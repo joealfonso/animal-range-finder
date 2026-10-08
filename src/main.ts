@@ -264,9 +264,10 @@ async function boot() {
     return cells;
   }
 
-  async function select(s: Species) {
+  async function select(s: Species, placeChanged = false) {
     // Zoomed into a place? Stay there: from a country/state filter, or while another animal is open at a place.
-    const fromFilter = !selected && filters.country ? { iso: filters.country, state: filters.state } : null;
+    // placeChanged: the place filter just moved under an open animal, so take the new place, not the animal's.
+    const fromFilter = (!selected || placeChanged) && filters.country ? { iso: filters.country, state: filters.state } : null;
     const keep = fromFilter ?? (selected && activeCountry ? { iso: activeCountry, state: activeState } : null);
     if (!selected) animalHome = stage.pov();
     if (fromFilter) placeEntry = fromFilter;
@@ -360,6 +361,29 @@ async function boot() {
     fly(countryPov(f), 1200);
   }
 
+  /**
+   * Browsing by place with an animal open: picking a different country or state on the globe moves the place filter
+   * there and opens the first animal listed for it, so the list and the open animal always match the place.
+   */
+  function movePlace(iso: string, state: string | null) {
+    const target = state ? stateById.get(state) : byIso.get(iso);
+    if (!target) return;
+    flightToken++;
+    if (iso !== filters.country) stage.setFilterCountry(iso);
+    filters.country = iso;
+    filters.state = state;
+    refresh();
+    const pov = countryPov(target);
+    if (list[0]) {
+      select(list[0], true);
+      animalHome = pov; // Esc from here closes the animal and stays at this place
+    } else {
+      animalHome = null; // nothing lives here: close the animal without flying back to where it was opened
+      deselect();
+    }
+    fly(pov, state ? 1200 : 1300);
+  }
+
   function clearCountryFilter() {
     filters.country = null;
     filters.state = null;
@@ -419,6 +443,7 @@ async function boot() {
 
   stage.onCountryClick((iso) => {
     if (selected) {
+      if (filters.country && iso !== filters.country) return movePlace(iso, null);
       // any country, not just the range: the plate says how many records come from it, even none
       if (iso !== activeCountry) zoomCountry(iso);
       return;
@@ -439,6 +464,8 @@ async function boot() {
   stage.onUserControl(() => flightToken++);
 
   stage.onStateClick((id) => {
+    const f = stateById.get(id);
+    if (selected && filters.country && f && id !== filters.state) return movePlace(f.properties.iso, id);
     const current = selected ? activeState : filters.state;
     if (id === current) return;
     zoomState(id);
