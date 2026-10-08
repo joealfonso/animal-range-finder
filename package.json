@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "data": "tsx scripts/build-data.ts",
     "assets": "tsx scripts/fetch-assets.ts && tsx scripts/fetch-states.ts",
-    "states": "tsx scripts/fetch-states.ts"
+    "states": "tsx scripts/fetch-states.ts",
+    "check": "tsx scripts/check-data.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
