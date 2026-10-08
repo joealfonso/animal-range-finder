@@ -586,6 +586,72 @@ kbd {
   color: var(--accent);
   border-color: var(--accent);
 }
+.hear {
+  margin-top: 16px;
+}
+.hear button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 5px 16px 5px 5px;
+  border: 1px solid var(--rule-2);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  text-align: left;
+}
+.hear button:hover,
+.hear button[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+.hear-icon {
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.hear-icon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 11px;
+  height: 12px;
+  transform: translateX(1px);
+  background: var(--bg);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+[aria-pressed='true'] .hear-icon::before {
+  width: 10px;
+  height: 10px;
+  transform: none;
+  clip-path: none;
+}
+[aria-pressed='true'] .hear-icon {
+  animation: hear-pulse 1.2s ease-in-out infinite;
+}
+@keyframes hear-pulse {
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 90, 54, 0.22);
+  }
+}
+.hear-dur {
+  color: var(--ink-3);
+}
+.hear-credit {
+  margin: 6px 0 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.hear-credit a {
+  color: var(--ink-2);
+}
 .desc {
   margin: 22px 0 0;
   font-size: 17.5px;

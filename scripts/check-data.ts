@@ -63,6 +63,13 @@ for (const s of species) {
     if (!(await exists(`${PUB}/${s.img}`))) fail(at, `photo ${s.img} is missing`);
     if (!isNum(s.imgW) || !isNum(s.imgH)) fail(at, 'photo has no width/height');
   }
+  if (s.sound) {
+    if (!(await exists(`${PUB}/${s.sound.src}`))) fail(at, `sound ${s.sound.src} is missing`);
+    if (!isNum(s.sound.dur) || s.sound.dur <= 0) fail(at, 'sound has no duration');
+    if (!s.sound.label) fail(at, 'sound has no label');
+    if (!isUrl(s.sound.credit?.page)) fail(at, `sound page link is not http(s): ${s.sound.credit?.page}`);
+    if (s.sound.credit?.licenseUrl != null && !isUrl(s.sound.credit.licenseUrl)) fail(at, `sound licence link is not http(s): ${s.sound.credit.licenseUrl}`);
+  }
   const rangePath = `${PUB}/data/range/${s.id}.json`;
   if (!(await exists(rangePath))) fail(at, `${rangePath} is missing`);
   else {
