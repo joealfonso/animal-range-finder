@@ -9,7 +9,7 @@ import { createSearch, type Filters } from './search';
 import { HEAT_BANDS } from './heat';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
-import { STATUS_LABEL, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
+import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
 
 const BASE = import.meta.env.BASE_URL;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -709,7 +709,9 @@ async function boot() {
         <div class="titles">
           <h2>${esc(s.name)}</h2>
           <p class="sci">${esc(s.sci)}</p>
-          <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span></p>
+          <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span>${
+            STATUS_NOTE[s.status] ? `<span class="status-note">${STATUS_NOTE[s.status]}</span>` : ''
+          }</p>
           ${hear(s)}
         </div>
       </div>

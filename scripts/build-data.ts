@@ -219,6 +219,7 @@ const GROUPS: Record<string, string> = {
   Cephalopoda: 'Mollusc', Malacostraca: 'Crustacean', Testudines: 'Reptile', Crocodylia: 'Reptile',
   Squamata: 'Reptile', Sphenodontia: 'Reptile', Coelacanthi: 'Fish', Holocephali: 'Fish', Gastropoda: 'Mollusc', Bivalvia: 'Mollusc',
   Scyphozoa: 'Jellyfish', Cubozoa: 'Jellyfish', Hydrozoa: 'Jellyfish', Asteroidea: 'Starfish',
+  Arachnida: 'Spider', Clitellata: 'Worm', Echinoidea: 'Sea urchin',
 };
 const PHYLUM: Record<string, string> = { Mollusca: 'Mollusc', Arthropoda: 'Arthropod', Chordata: 'Fish' }; // chordates with no recognised class here are bony fishes (tetrapod classes are mapped above)
 /** Saves the whole photo (no cropping, so the animal is never cut off) and returns its size. */

@@ -570,6 +570,12 @@ kbd {
   font-size: 11px;
   color: var(--ink-2);
 }
+.status-note {
+  max-width: 30ch;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
 .scale {
   display: inline-flex;
   gap: 9px;
