@@ -104,6 +104,17 @@ const KINDS: Record<string, string[]> = {
   Coenobitidae: ['crab'],
   Apidae: ['bee'],
   Nymphalidae: ['butterfly'],
+  // jellyfish and starfish: the man o' war and sea stars don't say so in their names
+  Physaliidae: ['jellyfish', 'jelly'],
+  Ulmaridae: ['jelly'],
+  Cyaneidae: ['jelly'],
+  Chirodropidae: ['jelly', 'box jelly'],
+  Pelagiidae: ['jelly', 'sea nettle'],
+  Rhizostomatidae: ['jelly'],
+  Oceaniidae: ['jelly'],
+  Asteriidae: ['starfish', 'sea star'],
+  Acanthasteridae: ['sea star'],
+  Ophidiasteridae: ['starfish'],
 };
 
 /** Lower case, accents dropped ("Grévy's" → "grevys"), split into words. */
