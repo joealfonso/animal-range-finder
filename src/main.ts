@@ -637,7 +637,7 @@ async function boot() {
                   .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
                   .join('')}</span>
                  <span class="legend-ends" aria-hidden="true"><span>fewer records</span><span>more</span></span>
-                 <p class="note">Where wild records are densest, smoothed over about 2°. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p>`
+                 <p class="note">Where wild records are densest. Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the individual records, with the shading relative to what is in view. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p>`
               : `<p class="legend-point"><i aria-hidden="true"></i>One wild record${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
                  <p class="note">Each point is a record from the GBIF sample, rounded to ${
                    s.pointsRounding === 0.1
