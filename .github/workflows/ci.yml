@@ -1,0 +1,24 @@
+# Runs on every pull request (and on main after a merge): checks the built data in public/, then type-checks and
+# builds the site the same way Cloudflare does. A red check on a PR means it would break the site if merged.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check data files
+        run: npm run check
+      - name: Type-check and build
+        run: npm run build

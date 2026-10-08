@@ -28,6 +28,8 @@ For each new species the script:
 
 Finished species are cached in `.cache/`, so a rerun only fetches new rows. Species with no match, too few records or no summary are skipped and listed in `.cache/_failed.txt`.
 
+Then run `npm run check`. It confirms every animal has its range, points and photo files, that links are http(s), that no text contains HTML, and that every country and state it names exists. CI runs the same check and the production build on every pull request.
+
 `npm run assets` re-creates the globe textures, country borders and per-country state files (NASA, Natural Earth). `npm run states` rebuilds only the state files.
 
 ## API keys
