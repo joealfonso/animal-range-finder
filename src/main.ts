@@ -402,6 +402,7 @@ async function boot() {
 
   function deselect() {
     flightToken++;
+    stopSound();
     selected = null;
     activeCountry = null;
     activeState = null;
@@ -605,6 +606,33 @@ async function boot() {
     zoomState(id);
   });
 
+  // ---------- sound ----------
+  // One player for the page, so opening another animal or closing this one stops the clip.
+  const player = new Audio();
+  player.preload = 'none';
+  let playingId = -1;
+  function syncSoundBtn() {
+    plate.querySelector('button[data-action="sound"]')?.setAttribute('aria-pressed', String(playingId === selected?.id));
+  }
+  function stopSound() {
+    player.pause();
+    playingId = -1;
+    syncSoundBtn();
+  }
+  function toggleSound() {
+    const s = selected;
+    if (!s?.sound) return;
+    if (playingId === s.id) return stopSound();
+    player.src = BASE + s.sound.src;
+    playingId = s.id;
+    syncSoundBtn();
+    player.play().catch(stopSound);
+  }
+  player.addEventListener('ended', () => {
+    playingId = -1;
+    syncSoundBtn();
+  });
+
   // ---------- plate ----------
   function scale(status: string) {
     const rungs = ['LC', 'NT', 'VU', 'EN', 'CR'];
@@ -615,6 +643,7 @@ async function boot() {
   function renderPlate() {
     const s = selected;
     if (!s) return;
+    if (playingId !== -1 && playingId !== s.id) stopSound();
     frameDirty = blockersDirty = true;
     const focusedIso = (document.activeElement as HTMLElement | null)?.dataset?.iso;
     const focusedState = (document.activeElement as HTMLElement | null)?.dataset?.state;
@@ -680,6 +709,7 @@ async function boot() {
           <h2>${esc(s.name)}</h2>
           <p class="sci">${esc(s.sci)}</p>
           <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span></p>
+          ${hear(s)}
         </div>
       </div>
       <p class="desc">${esc(s.desc)}</p>
@@ -721,6 +751,19 @@ async function boot() {
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();
   }
 
+  /** A play button for the animal's call, credited like the photo. */
+  function hear(s: Species) {
+    const a = s.sound;
+    if (!a) return '';
+    const c = a.credit;
+    return `<div class="hear">
+        <button type="button" data-action="sound" aria-pressed="${playingId === s.id}">
+          <span class="hear-icon" aria-hidden="true"></span>Hear its ${esc(a.label)}<span class="hear-dur">${Math.max(1, Math.round(a.dur))}s</span>
+        </button>
+        <p class="hear-credit">Sound ${c.author !== 'Unknown' ? `${esc(c.author)}, ` : ''}${extLink(c.licenseUrl ?? c.page, esc(c.license))}, ${extLink(c.page, 'Commons')}</p>
+      </div>`;
+  }
+
   /** With a pin down: how close this animal's nearest sampled record is to it. */
   function nearFact(s: Species) {
     const hit = near?.hits?.get(s.id);
@@ -741,6 +784,7 @@ async function boot() {
     const t = e.target as HTMLElement;
     if (t.closest('#back')) return void back();
     if (t.closest('[data-action="full-range"]')) return void showFullRange();
+    if (t.closest('[data-action="sound"]')) return void toggleSound();
     const mb = t.closest<HTMLElement>('button[data-mode]');
     if (mb) {
       rangeMode = mb.dataset.mode === 'points' ? 'points' : 'heat';

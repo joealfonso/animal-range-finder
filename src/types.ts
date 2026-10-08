@@ -31,6 +31,17 @@ export interface Species {
   datasets: { title: string; doi: string | null; license: string }[];
   /** states/provinces the sampled records fall in, largest share first */
   states: StateShare[];
+  /** a short recording of its call, for animals with one on Commons (data/sounds.csv) */
+  sound?: Sound;
+}
+
+export interface Sound {
+  src: string;
+  /** seconds */
+  dur: number;
+  /** what it is, finishing "Hear its ...": "roar", "song" */
+  label: string;
+  credit: Credit;
 }
 
 export interface StateShare {
