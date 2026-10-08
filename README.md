@@ -45,4 +45,6 @@ NASA Visible Earth (Blue Marble, public domain) · Natural Earth (public domain)
 - A range here is a density of GBIF observation records, not an expert-drawn range map. It follows where people observe, so it is thinner in places with few observers. Records GBIF flags as captive or managed are removed, but zoo or escaped animals the data does not flag can remain.
 - States come from a sample of records, so a state with only a handful of records may be missing, and a state is only listed inside the animal's range countries.
 - Conservation status is the IUCN category as republished by GBIF and may lag the Red List.
+- Continents come from the countries holding at least 1.5% of an animal's records, with Russia split at the Urals. Where the only records on a continent are zoo animals GBIF doesn't flag, `data/continent-fixes.csv` drops that continent by hand.
+- GBIF files some animals we don't mean under a species: dogs and dingoes under the wolf, for example. `EXCLUDE` in `scripts/build-data.ts` leaves those subspecies out. GBIF also doesn't separate the wild Bactrian camel from the domestic one, so the catalogue lists the Bactrian camel as a whole.
 - The range sample is capped per species (a few hundred to about 1,200 records) to keep the build fast.
