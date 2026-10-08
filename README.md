@@ -1,4 +1,4 @@
-# Fauna Mundi
+# Animal Range Finder
 
 Animals on an interactive 3D globe. Vite + TypeScript + three.js via globe.gl. Static data, no backend.
 

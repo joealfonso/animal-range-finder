@@ -6,7 +6,7 @@
 import sharp from 'sharp';
 import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 
-const UA = 'animal-globe/0.1 (static data build; https://github.com/joealfonso)';
+const UA = 'animal-range-finder/0.1 (static data build; https://github.com/joealfonso/animal-range-finder)';
 const GBIF = 'https://api.gbif.org/v1';
 const CELL = 2; // degrees per density cell
 const PAGE = 300;
