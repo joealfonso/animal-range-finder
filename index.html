@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Fauna Mundi — animals by range</title>
+    <meta name="description" content="A catalogue of animals set against a globe. Search by name or place and see where each species lives, drawn from GBIF occurrence records." />
+    <meta name="theme-color" content="#06070a" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3' fill='%23ff5a36'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="globe" role="img" aria-label="Interactive globe. Use the search field to choose an animal; its range is drawn on the globe."></div>
+
+    <svg id="leader" aria-hidden="true">
+      <path id="leader-line" pathLength="1" />
+      <circle id="leader-dot" r="3.5" />
+      <circle id="leader-ring" r="9" />
+    </svg>
+    <div id="pins" aria-hidden="true"></div>
+
+    <header class="mast">
+      <h1 class="mark">Fauna <em>Mundi</em></h1>
+      <p class="kicker"><span id="count">—</span> animals, catalogued by where they live</p>
+      <p class="readout" id="readout" aria-hidden="true">LAT — &nbsp; LON — &nbsp; ALT —</p>
+    </header>
+
+    <nav class="index" aria-label="Animals">
+      <ul id="results" role="listbox" aria-label="Animals matching your search"></ul>
+      <p id="empty" class="empty" hidden>Nothing in the catalogue matches that. Try a Latin name, a country, or fewer filters.</p>
+    </nav>
+
+    <aside class="plate" id="plate" aria-live="polite" hidden></aside>
+
+    <footer class="finder">
+      <label class="finder-field">
+        <span class="sr">Search animals by common name, scientific name or country</span>
+        <input
+          id="q"
+          type="text"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="results"
+          aria-autocomplete="list"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="An animal, a Latin name, a country"
+        />
+        <kbd aria-hidden="true">/</kbd>
+      </label>
+      <div class="filters" id="filters"></div>
+    </footer>
+
+    <button class="colophon-btn" id="credits-btn" aria-expanded="false" aria-controls="credits">Sources &amp; credits</button>
+
+    <aside class="credits" id="credits" hidden aria-label="Sources and credits">
+      <button class="credits-close" id="credits-close">Close <span aria-hidden="true">Esc</span></button>
+      <h2>Sources &amp; credits</h2>
+      <p class="lede">Everything on this page comes from openly licensed or public-domain material. Nothing is generated.</p>
+      <dl>
+        <dt>Globe imagery</dt>
+        <dd><a href="https://visibleearth.nasa.gov/images/73909/topography" target="_blank" rel="noopener">NASA Visible Earth — Blue Marble: Topography and Bathymetry</a>. Public domain. Colour reduced and relief map derived from the same image.</dd>
+        <dt>Country and state borders</dt>
+        <dd><a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a>, 1:50m Admin 0 Countries and 1:10m Admin 1 States and Provinces, simplified for the globe. Public domain.</dd>
+        <dt>Ranges, taxonomy, conservation status</dt>
+        <dd><a href="https://www.gbif.org/" target="_blank" rel="noopener">GBIF — the Global Biodiversity Information Facility</a>. Occurrence records are CC0 or CC BY according to each publishing dataset; the datasets behind each range are listed on its entry. Conservation categories are the IUCN Red List categories as republished by GBIF. A range is a density of georeferenced records aggregated to 2° cells, not an expert-drawn map. Records GBIF flags as captive or managed are left out. States are assigned by placing each sampled record inside the Natural Earth state borders.</dd>
+        <dt>Descriptions</dt>
+        <dd>Opening sentences from <a href="https://www.wikipedia.org/" target="_blank" rel="noopener">Wikipedia</a>, licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>. Each entry links to its article and history.</dd>
+        <dt>Photographs</dt>
+        <dd><a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>. Each photo is credited beneath it with author and licence; only CC0, CC BY, CC BY-SA and public-domain files are used.</dd>
+        <dt>Type</dt>
+        <dd>Instrument Serif and IBM Plex Mono, both SIL Open Font License 1.1.</dd>
+        <dt>Stars</dt>
+        <dd>Procedurally drawn for this page. They are not a map of the real sky.</dd>
+      </dl>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
