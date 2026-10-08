@@ -218,6 +218,7 @@ const GROUPS: Record<string, string> = {
   Actinopterygii: 'Fish', Elasmobranchii: 'Fish', Chondrichthyes: 'Fish', Sarcopterygii: 'Fish',
   Cephalopoda: 'Mollusc', Malacostraca: 'Crustacean', Testudines: 'Reptile', Crocodylia: 'Reptile',
   Squamata: 'Reptile', Sphenodontia: 'Reptile', Coelacanthi: 'Fish', Holocephali: 'Fish', Gastropoda: 'Mollusc', Bivalvia: 'Mollusc',
+  Scyphozoa: 'Jellyfish', Cubozoa: 'Jellyfish', Hydrozoa: 'Jellyfish', Asteroidea: 'Starfish',
 };
 const PHYLUM: Record<string, string> = { Mollusca: 'Mollusc', Arthropoda: 'Arthropod', Chordata: 'Fish' }; // chordates with no recognised class here are bony fishes (tetrapod classes are mapped above)
 /** Saves the whole photo (no cropping, so the animal is never cut off) and returns its size. */
@@ -243,7 +244,7 @@ async function commonsThumb(file: string) {
 const clean = (s: string) => (s || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const okLicense = (l: string) => /^(CC0|CC BY(?!-N)(?!.*-ND)|CC BY-SA|Public domain|PD|No restrictions)/i.test(l) && !/NC|ND/i.test(l);
 
-async function build(row: { scientific: string; wikipedia: string }) {
+async function build(row: { scientific: string; wikipedia: string; name: string }) {
   const sci = row.scientific;
   const m = await getJSON(`${GBIF}/species/match?kingdom=Animalia&name=${encodeURIComponent(sci)}`);
   if (!m || !m.usageKey || m.matchType === 'NONE') throw new Error('no GBIF match');
@@ -291,7 +292,7 @@ async function build(row: { scientific: string; wikipedia: string }) {
   return {
     id: key,
     sci: m.canonicalName ?? sci,
-    name: wiki.title as string,
+    name: row.name || (wiki.title as string),
     group: GROUPS[m.class] ?? PHYLUM[m.phylum] ?? m.class ?? 'Animal',
     family: m.family ?? '',
     status,
@@ -308,8 +309,9 @@ async function build(row: { scientific: string; wikipedia: string }) {
 
 const rows = (await readFile(process.env.SPECIES_CSV ?? 'data/species.csv', 'utf8'))
   .trim().split('\n').slice(1).map((l) => {
-    const [scientific, ...w] = l.split(',');
-    return { scientific: scientific.trim(), wikipedia: w.join(',').trim() };
+    // the optional third column is the everyday name, for animals whose Wikipedia article is titled in Latin
+    const [scientific, wikipedia, name] = l.split(',').map((x) => (x ?? '').trim());
+    return { scientific, wikipedia, name: name ?? '' };
   });
 
 const out: any[] = [];
@@ -342,6 +344,7 @@ async function worker() {
           await writeFile(cacheFile, JSON.stringify(rec));
           console.log('occ ', row.scientific, `${rec.occurrences} wild, ${rec.captiveExcluded} captive left out`);
         }
+        if (row.name) rec.name = row.name;
         out.push(rec);
         continue;
       }
@@ -396,6 +399,8 @@ for (const s of out) {
 }
 out.sort((a, b) => a.name.localeCompare(b.name));
 out.forEach((s, n) => (s.no = String(n + 1).padStart(3, '0')));
+// a dataset title like "aguas someras (<50m)" would trip the check for HTML in the text: show the same signs safely
+for (const s of out) for (const d of s.datasets) d.title = d.title.replace(/</g, '＜').replace(/>/g, '＞');
 const published = out.map(({ points, imgSrc, excludedTaxa, ...rest }) => rest);
 await writeFile('public/data/species.json', JSON.stringify({ generated: new Date().toISOString(), species: published }));
 console.log(`\n${out.length} species written, ${failed.length} skipped`);

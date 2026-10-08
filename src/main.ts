@@ -71,7 +71,8 @@ async function boot() {
   for (const s of species) s.states ??= [];
   const countries: Country[] = countryRes.features;
   countries.forEach(annotateCountry);
-  const byIso = new Map(countries.map((c) => [c.properties.iso, c]));
+  // Australia shares AU with two small territories listed after it; reversed, the first (the mainland) wins
+  const byIso = new Map([...countries].reverse().map((c) => [c.properties.iso, c]));
   const isoName = (iso: string) => byIso.get(iso)?.properties.name ?? iso;
   const byId = new Map(species.map((s) => [s.id, s]));
 

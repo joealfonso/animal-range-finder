@@ -12,7 +12,7 @@ The built data is committed under `public/`, so the app runs without any network
 
 ## Adding animals
 
-Append a row to `data/species.csv` (`scientific name, Wikipedia article title`) and run:
+Append a row to `data/species.csv` (`scientific name, Wikipedia article title`, and optionally the everyday name) and run:
 
 ```bash
 npm run data
@@ -21,7 +21,7 @@ npm run data
 For each new species the script:
 
 1. matches the name in GBIF and reads its IUCN Red List category,
-2. reads the opening of the Wikipedia article,
+2. reads the opening of the Wikipedia article, and names the animal after its title unless the row gives an everyday name (add one whenever the article is titled in Latin, as with `Aurelia aurita,Aurelia aurita,Moon jellyfish`, so the app always shows and searches the common name),
 3. finds the article's lead photo on Wikimedia Commons and keeps it only if it is CC0, CC BY, CC BY-SA or public domain (author and licence are stored and shown in the UI). Photos are resized but never cropped, so the animal is never cut off,
 4. samples georeferenced GBIF occurrences (leaving out records GBIF flags as captive or managed), bins them into 2° cells for the range layer, takes country counts to list where it lives, and places each sampled record inside a state or province,
 5. writes `public/data/species.json`, `public/data/range/<gbif key>.json` and `public/img/<gbif key>.webp`.

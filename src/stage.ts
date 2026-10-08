@@ -178,7 +178,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     if (!s) segCache.set(k, (s = ringSegments(g)));
     return s;
   };
-  const byIso = new Map(countries.map((c) => [c.properties.iso, c]));
+  // Australia shares AU with two small territories listed after it; reversed, the first (the mainland) wins
+  const byIso = new Map([...countries].reverse().map((c) => [c.properties.iso, c]));
   const countrySegs = (iso: string) => {
     const c = byIso.get(iso);
     return c ? segs('c:' + iso, c.geometry) : new Float32Array();
