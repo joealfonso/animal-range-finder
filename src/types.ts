@@ -96,3 +96,16 @@ export const STATUS_LABEL: Record<string, string> = {
   DD: 'Data deficient',
   NE: 'Not evaluated',
 };
+
+/** What each status means, in plain words, shown under it on the animal's page. */
+export const STATUS_NOTE: Record<string, string> = {
+  EX: 'None are left anywhere.',
+  EW: 'It now survives only in zoos and parks, not in the wild.',
+  CR: 'In very great danger of dying out in the wild.',
+  EN: 'In danger of dying out in the wild.',
+  VU: 'At risk: it could become endangered.',
+  NT: 'Not at risk yet, but could be soon.',
+  LC: 'Not at risk: it is doing well in the wild.',
+  DD: 'Scientists don’t have enough information yet to say how at risk it is.',
+  NE: 'Scientists haven’t checked yet how at risk it is, so this doesn’t mean it is safe or in danger.',
+};
