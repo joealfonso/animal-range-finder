@@ -15,6 +15,7 @@ const MAX_PAGES = 4;
 await mkdir('.cache', { recursive: true });
 await mkdir('public/img', { recursive: true });
 await mkdir('public/data/range', { recursive: true });
+await mkdir('public/data/points', { recursive: true });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function getJSON(url: string, tries = 4): Promise<any> {
@@ -331,6 +332,24 @@ await Promise.all(Array.from({ length: 6 }, worker));
 // cached records may predate newer group mappings
 for (const s of out) s.group = GROUPS[s.group] ?? (s.group === 'Animal' ? 'Fish' : s.group);
 for (const s of out) s.states = await assignStates(s.points, s.iso);
+
+// Individual wild records for the "Points" view. Locations are rounded: ~1 km normally, ~11 km for critically
+// endangered and endangered animals, so the map never pinpoints where a threatened animal can be found.
+const SENSITIVE = new Set(['CR', 'EN', 'EW']);
+for (const s of out) {
+  const step = SENSITIVE.has(s.status) ? 10 : 100; // 0.1° or 0.01°
+  const seen = new Set<string>();
+  const pts: number[][] = [];
+  for (const [lat, lng] of s.points as Pt[]) {
+    const p = [Math.round(lat * step) / step, Math.round(lng * step) / step];
+    const k = p.join();
+    if (seen.has(k)) continue; // rounding merges repeat sightings at the same spot
+    seen.add(k);
+    pts.push(p);
+  }
+  s.pointsRounding = step === 10 ? 0.1 : 0.01;
+  await writeFile(`public/data/points/${s.id}.json`, JSON.stringify(pts));
+}
 out.sort((a, b) => a.name.localeCompare(b.name));
 out.forEach((s, n) => (s.no = String(n + 1).padStart(3, '0')));
 const published = out.map(({ points, imgSrc, ...rest }) => rest);

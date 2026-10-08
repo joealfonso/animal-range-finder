@@ -6,6 +6,7 @@ import './styles.css';
 
 import { createStage } from './stage';
 import { createSearch, type Filters } from './search';
+import { HEAT_BANDS } from './heat';
 import { annotateCountry, countryPov, rangePov } from './geo';
 import { STATUS_LABEL, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
 
@@ -69,6 +70,16 @@ async function boot() {
   // The place you were looking at when you opened the animal from a filtered list. Esc there closes the animal
   // and leaves you where you were, instead of stepping out through country and range.
   let placeEntry: { iso: string; state: string | null } | null = null;
+  // how the range is drawn; remembered per browser, heatmap by default
+  let rangeMode: 'heat' | 'points' = 'heat';
+  let shownPoints = 0;
+  try {
+    const saved = localStorage.getItem('arf.rangeMode');
+    if (saved === 'points' || saved === 'dots') rangeMode = 'points'; // "dots" was the old name
+  } catch {
+    // storage blocked: keep the default
+  }
+  stage.setRangeMode(rangeMode);
   // Where the camera was before we moved it, one for each layer Back can undo.
   let animalHome: Pov | null = null;
   let filterHome: Pov | null = null;
@@ -231,6 +242,17 @@ async function boot() {
 
 
   // ---------- selecting animals ----------
+  const pointCache = new Map<number, number[][]>();
+  async function loadPoints(s: Species): Promise<number[][]> {
+    const hit = pointCache.get(s.id);
+    if (hit) return hit;
+    const pts: number[][] = await fetch(`${BASE}data/points/${s.id}.json`)
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => []);
+    pointCache.set(s.id, pts);
+    return pts;
+  }
+
   async function loadRange(s: Species): Promise<Cell[]> {
     const hit = cache.get(s.id);
     if (hit) return hit;
@@ -248,6 +270,7 @@ async function boot() {
     else if (!keep || !placeEntry || keep.iso !== placeEntry.iso || keep.state !== placeEntry.state) placeEntry = null;
     stage.stopAutoRotate();
     selected = s;
+    shownPoints = 0;
     activeCountry = keep?.iso ?? null;
     activeState = keep?.state ?? null;
     const idx = list.findIndex((x) => x.id === s.id);
@@ -261,9 +284,11 @@ async function boot() {
     document.body.classList.add('has-plate');
     stage.shiftTo(...offset(true), 700);
 
-    const cells = await loadRange(s);
+    const [cells, pts] = await Promise.all([loadRange(s), loadPoints(s)]);
     if (selected?.id !== s.id) return;
-    stage.showRange(cells);
+    stage.showRange(cells, pts);
+    shownPoints = pts.length;
+    if (rangeMode === 'points') renderPlate(); // the legend counts the points
     animalPov = rangePov(cells);
     if (!keep) flyTwoStage(animalPov);
   }
@@ -477,7 +502,13 @@ async function boot() {
       ? `<p class="note"><button type="button" class="textlink" data-action="full-range">See its whole range</button></p>`
       : '';
     plate.innerHTML = `
-      <button class="back" type="button" id="back">← Back <kbd>Esc</kbd></button>
+      <div class="plate-bar">
+        <button class="back" type="button" id="back">← Back <kbd>Esc</kbd></button>
+        <span class="modes" role="group" aria-label="Show the range as">
+          <button type="button" data-mode="heat" aria-pressed="${rangeMode === 'heat'}">Heatmap</button>
+          <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>
+        </span>
+      </div>
       <p class="plate-no">No. ${s.no} · ${esc(s.group)} · ${esc(s.family)}</p>
       <div class="plate-head${s.img && wide ? ' is-wide' : ''}">
         ${photo}
@@ -498,8 +529,24 @@ async function boot() {
           ${statesBlock}
           <p class="note">${note}</p>${fullRange}</dd></div>
         <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF</dd></div>
+        <div><dt>Map</dt><dd>
+          ${
+            rangeMode === 'heat'
+              ? `<span class="legend" aria-hidden="true">${HEAT_BANDS.slice(1)
+                  .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
+                  .join('')}</span>
+                 <span class="legend-ends" aria-hidden="true"><span>fewer records</span><span>more</span></span>
+                 <p class="note">Where wild records are densest, smoothed over about 2°. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p>`
+              : `<p class="legend-point"><i aria-hidden="true"></i>One wild record${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
+                 <p class="note">Each point is a record from the GBIF sample, rounded to ${
+                   s.pointsRounding === 0.1
+                     ? 'about 11 km, because this animal is threatened and exact locations can help poachers'
+                     : 'about 1 km'
+                 }. Repeat sightings at the same spot show as one point.</p>`
+          }
+        </dd></div>
       </dl>
-      <p class="prov">Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, each dot is a 2° cell sized by how many records fall in it), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
+      <p class="prov">Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
         .map((d) => (d.doi ? `<a href="https://doi.org/${esc(d.doi.replace(/^doi:/, ''))}" target="_blank" rel="noopener">${esc(d.title)}</a>` : esc(d.title)))
         .join('; ')}. Conservation category: IUCN Red List via GBIF. ${
         s.wiki ? `Text: <a href="${esc(s.wiki)}" target="_blank" rel="noopener">Wikipedia</a>, CC BY-SA 4.0.` : ''
@@ -513,6 +560,19 @@ async function boot() {
     const t = e.target as HTMLElement;
     if (t.closest('#back')) return void back();
     if (t.closest('[data-action="full-range"]')) return void showFullRange();
+    const mb = t.closest<HTMLElement>('button[data-mode]');
+    if (mb) {
+      rangeMode = mb.dataset.mode === 'points' ? 'points' : 'heat';
+      try {
+        localStorage.setItem('arf.rangeMode', rangeMode);
+      } catch {
+        // storage blocked: the choice just won't be remembered
+      }
+      stage.setRangeMode(rangeMode);
+      renderPlate();
+      plate.querySelector<HTMLElement>(`button[data-mode="${rangeMode}"]`)?.focus();
+      return;
+    }
     const sb = t.closest<HTMLElement>('button[data-state]');
     if (sb?.dataset.state) {
       if (sb.dataset.state === activeState) back();

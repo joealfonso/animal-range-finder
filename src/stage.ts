@@ -1,6 +1,7 @@
 import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
+import { createHeat } from './heat';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -23,9 +24,12 @@ export interface Stage {
   setStates(states: StateFeature[] | null): void;
   /** active: the chosen state; marked: states where the open animal was recorded */
   setStateMarks(active: string | null, marked: Set<string>): void;
-  /** How close we are: dots shrink and fade as you drill from the whole range to a country to a state. */
+  /** How close we are: record points grow a little as you drill from the whole range to a country to a state. */
   setRangeDetail(level: 'range' | 'country' | 'state'): void;
-  showRange(cells: Cell[]): void;
+  /** cells feed the heatmap; points are the individual (rounded) wild records */
+  showRange(cells: Cell[], points: number[][]): void;
+  /** heat: smoothed record-density bands; points: every sampled wild record */
+  setRangeMode(mode: 'heat' | 'points'): void;
   clearRange(): void;
   project(lat: number, lng: number): { x: number; y: number; visible: boolean };
   shiftTo(x: number, y: number, ms: number): void;
@@ -226,54 +230,60 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     }
   }
 
-  // ---- range: every 2° cell is one flat disc, all in a single instanced draw call
-  const dim = new THREE.Color('#5a2418');
-  const hot = new THREE.Color('#ff5a36');
-  const DETAIL = { range: { size: 1, alpha: 0.86 }, country: { size: 0.7, alpha: 0.78 }, state: { size: 0.32, alpha: 0.7 } };
-  let detail = DETAIL.range;
-  let rangeCells: Cell[] = [];
-  const discGeo = new THREE.CircleGeometry(1, small ? 16 : 28);
-  const discMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: detail.alpha, depthWrite: false, side: THREE.DoubleSide });
-  let discs: THREE.InstancedMesh | null = null;
-  const m4 = new THREE.Matrix4();
-  const quat = new THREE.Quaternion();
-  const zAxis = new THREE.Vector3(0, 0, 1);
-  const pos = new THREE.Vector3();
-  const nrm = new THREE.Vector3();
-  const scl = new THREE.Vector3();
-  const tmp: number[] = [];
-  const col = new THREE.Color();
+  // ---- range, two ways: a heatmap of record density, or every sampled wild record as its own point
+  const heat = createHeat(R);
+  scene.add(heat.mesh);
+  let rangeMode: 'heat' | 'points' = 'heat';
+  let hasRange = false;
 
-  function layoutDiscs() {
-    if (!discs) return;
-    rangeCells.forEach(([lat, lng, w], i) => {
+  // Points: one draw call for all records; a fixed size on screen so single records stay legible when zoomed in.
+  const POINT_PX = { range: 3.2, country: 4.2, state: 5.5 };
+  let pointPx = POINT_PX.range;
+  const recGeo = new THREE.BufferGeometry();
+  const recMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { size: { value: pointPx * dpr }, fill: { value: new THREE.Color('#ff5a36') }, rim: { value: new THREE.Color('#1c0904') } },
+    vertexShader: /* glsl */ `
+      uniform float size;
+      void main() {
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = size;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 fill; uniform vec3 rim;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.4, d);
+        if (a < 0.01) discard;
+        // a dark rim keeps each point readable over bright desert and snow
+        gl_FragColor = vec4(mix(fill, rim, smoothstep(0.26, 0.4, d)), a * 0.92);
+      }`,
+  });
+  const records = new THREE.Points(recGeo, recMat);
+  records.renderOrder = 8; // above borders and heat
+  records.frustumCulled = false;
+  records.visible = false;
+  scene.add(records);
+
+  const applyMode = () => {
+    heat.setVisible(hasRange && rangeMode === 'heat');
+    records.visible = hasRange && rangeMode === 'points';
+  };
+  const setPointSize = () => (recMat.uniforms.size.value = pointPx * dpr);
+
+  function setRecords(pts: number[][]) {
+    const buf = new Float32Array(pts.length * 3);
+    const tmp: number[] = [];
+    pts.forEach(([lat, lng], i) => {
       tmp.length = 0;
       toXYZ(lat, lng, tmp);
-      nrm.set(tmp[0], tmp[1], tmp[2]).normalize();
-      pos.copy(nrm).multiplyScalar(R * 1.0065);
-      quat.setFromUnitVectors(zAxis, nrm);
-      const r = (((0.42 + 0.5 * Math.sqrt(w)) * detail.size * Math.PI) / 180) * R;
-      scl.set(r, r, 1);
-      discs!.setMatrixAt(i, m4.compose(pos, quat, scl));
+      buf[i * 3] = tmp[0] * 1.0105;
+      buf[i * 3 + 1] = tmp[1] * 1.0105;
+      buf[i * 3 + 2] = tmp[2] * 1.0105;
     });
-    discs.instanceMatrix.needsUpdate = true;
-    discMat.opacity = detail.alpha;
-  }
-
-  function buildDiscs(cells: Cell[]) {
-    if (discs) {
-      scene.remove(discs);
-      discs.dispose();
-      discs = null;
-    }
-    rangeCells = cells;
-    if (!cells.length) return;
-    discs = new THREE.InstancedMesh(discGeo, discMat, cells.length);
-    discs.renderOrder = 7;
-    discs.frustumCulled = false;
-    cells.forEach(([, , w], i) => discs!.setColorAt(i, col.copy(dim).lerp(hot, 0.35 + 0.65 * w)));
-    layoutDiscs();
-    scene.add(discs);
+    recGeo.setAttribute('position', new THREE.BufferAttribute(buf, 3));
+    recGeo.computeBoundingSphere();
   }
 
   // ---- pointer: hover and click from lat/lng (cheap point-in-polygon), with our own tooltip
@@ -437,6 +447,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
         renderer.setPixelRatio(dpr);
         globe.width(window.innerWidth).height(window.innerHeight);
         applyShift();
+        setPointSize();
         slowFrames = 0;
       }
     }
@@ -477,15 +488,23 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       paint();
     },
     setRangeDetail(level) {
-      if (detail === DETAIL[level]) return;
-      detail = DETAIL[level];
-      layoutDiscs();
+      pointPx = POINT_PX[level];
+      setPointSize();
     },
-    showRange(cells) {
-      buildDiscs(cells);
+    showRange(cells, points) {
+      hasRange = cells.length > 0 || points.length > 0;
+      if (cells.length) heat.show(cells);
+      setRecords(points);
+      applyMode();
     },
     clearRange() {
-      buildDiscs([]);
+      hasRange = false;
+      heat.hide();
+      applyMode();
+    },
+    setRangeMode(mode) {
+      rangeMode = mode;
+      applyMode();
     },
     project(lat, lng) {
       const c = globe.getCoords(lat, lng, 0.004);

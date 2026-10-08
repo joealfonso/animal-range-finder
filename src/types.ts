@@ -23,6 +23,8 @@ export interface Species {
   countries: { iso: string; share: number }[];
   continents: string[];
   occurrences: number;
+  /** rounding applied to published record points, in degrees (0.1 for threatened animals) */
+  pointsRounding?: number;
   /** records GBIF flags as captive/managed, left out of everything */
   captiveExcluded?: number;
   sampled: number;

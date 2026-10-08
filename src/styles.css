@@ -378,6 +378,32 @@ kbd {
 .plate[hidden] {
   display: none;
 }
+.plate-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.plate .plate-bar .back {
+  margin-bottom: 0;
+}
+.legend-point {
+  margin: 2px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+.legend-point i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px #1c0904;
+}
 .plate .back {
   font-family: var(--mono);
   font-size: 11px;
@@ -553,6 +579,44 @@ kbd {
   font-family: var(--mono);
   font-size: 10.5px;
   line-height: 1.5;
+  color: var(--ink-3);
+}
+.modes {
+  display: inline-flex;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.modes button {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 5px;
+}
+.modes button:hover {
+  color: var(--ink);
+}
+.modes button[aria-pressed='true'] {
+  color: var(--ink);
+  text-decoration-color: var(--accent);
+}
+.legend {
+  display: flex;
+  margin-top: 10px;
+  max-width: 220px;
+  height: 8px;
+  border: 1px solid var(--rule);
+}
+.legend i {
+  flex: 1;
+}
+.legend-ends {
+  display: flex;
+  justify-content: space-between;
+  max-width: 222px;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
   color: var(--ink-3);
 }
 .textlink {
