@@ -137,8 +137,19 @@ async function boot() {
       )
       .join('');
     empty.hidden = list.length > 0;
+    if (!list.length) empty.textContent = emptyMessage();
     tally.textContent = `${list.length}/${species.length}`;
     q.setAttribute('aria-activedescendant', list[activeIdx] ? `opt-${list[activeIdx].id}` : '');
+  }
+
+  /** Why the list is empty. A place with no animals is a gap in the sampled records, not a search the user got wrong. */
+  function emptyMessage() {
+    const placeOnly = run('', { continent: null, status: null, country: filters.country, state: filters.state });
+    if (filters.state && !placeOnly.length)
+      return `No sampled records place an animal in ${stateName(filters.state)}. States come from a sample of each animal's records, so smaller ones are often empty. Pick another state, or clear it with ✕ below.`;
+    if (filters.country && !placeOnly.length)
+      return `No animal in the catalogue has enough records in ${isoName(filters.country)} to list it there. Pick another country, or clear it with ✕ below.`;
+    return 'Nothing in the catalogue matches that. Try a Latin name, a country, or fewer filters.';
   }
 
   function setActive(i: number, scroll = true) {

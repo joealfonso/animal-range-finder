@@ -277,6 +277,17 @@ kbd {
   min-width: 460px;
   z-index: 6;
   text-shadow: 0 0 12px var(--bg), 0 0 3px var(--bg);
+  transition: left 0.6s ease, width 0.6s ease;
+}
+/* With an animal open, centre the finder in the space left of the plate, so the filters never run under it.
+   The plate's left edge is 100vw - edge - plate-w - 20px; 24px more keeps a gap. */
+@media (min-width: 901px) {
+  .has-plate .finder {
+    --free: calc(100vw - 2 * var(--edge) - var(--plate-w) - 44px);
+    left: calc(var(--edge) + var(--free) / 2);
+    width: min(560px, var(--free));
+    min-width: 0;
+  }
 }
 .finder-field {
   display: flex;
