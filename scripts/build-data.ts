@@ -41,12 +41,29 @@ const occBase = (key: number) =>
 
 type Pt = [number, number, string | null]; // lat, lng, ISO country code
 
+// Subspecies GBIF files under a species that are not the animal we mean. Their records are left out of every count
+// and the sample. Dogs (and the dingo) are filed under the wolf, and make up about half of its records.
+const EXCLUDE: Record<string, number[]> = {
+  'Canis lupus': [6164210 /* Canis lupus familiaris, dogs */, 6164184 /* Canis lupus dingo */],
+};
+
+// Hand corrections for continents whose only records there are zoo or captive animals GBIF does not flag.
+// data/continent-fixes.csv: scientific name, then the continents to drop, separated by semicolons.
+const continentFixes = new Map<string, string[]>(
+  (await readFile('data/continent-fixes.csv', 'utf8'))
+    .trim().split('\n').slice(1).filter((l) => l.trim() && !l.startsWith('#'))
+    .map((l) => {
+      const [sci, drop] = l.split(',');
+      return [sci.trim(), drop.split(';').map((c) => c.trim())];
+    }),
+);
+
 // Zoo, farm and released animals. GBIF flags many of them (degreeOfEstablishment); they are left out of every count.
 const CAPTIVE = new Set(['captive', 'managed', 'cultivated', 'released']);
 const isCaptive = (o: any) => CAPTIVE.has(String(o.degreeOfEstablishment ?? '').toLowerCase()) || o.establishmentMeans === 'MANAGED';
 
 /** A spread-out sample of wild, georeferenced records, plus which datasets they came from (for citation). */
-async function samplePoints(key: number, total: number) {
+async function samplePoints(key: number, total: number, exclude: Set<number>) {
   const pages = Math.min(MAX_PAGES, Math.ceil(total / PAGE));
   const stride = Math.max(PAGE, Math.floor((Math.min(total, 8000) - PAGE) / Math.max(1, pages - 1))); // deep offsets are very slow on GBIF
   const pts: Pt[] = [];
@@ -55,6 +72,7 @@ async function samplePoints(key: number, total: number) {
     const r = await getJSON(`${occBase(key)}&limit=${PAGE}&offset=${p * stride}`).catch(() => null);
     for (const o of r?.results ?? []) {
       if (typeof o.decimalLatitude !== 'number' || typeof o.decimalLongitude !== 'number' || isCaptive(o)) continue;
+      if (exclude.has(o.taxonKey) || exclude.has(o.acceptedTaxonKey)) continue;
       pts.push([Math.round(o.decimalLatitude * 1000) / 1000, Math.round(o.decimalLongitude * 1000) / 1000, o.countryCode ?? null]);
       if (o.datasetKey) datasets.set(o.datasetKey, (datasets.get(o.datasetKey) ?? 0) + 1);
     }
@@ -63,20 +81,27 @@ async function samplePoints(key: number, total: number) {
 }
 
 /** Everything the range depends on: counts with captive records removed, the sample, countries and citations. */
-async function occurrencePart(key: number) {
+async function occurrencePart(key: number, excludeKeys: number[] = []) {
   const head = await getJSON(`${occBase(key)}&limit=0&facet=country&facetLimit=60`);
   const all: number = head?.count ?? 0;
   const cap = await getJSON(`${occBase(key)}&degreeOfEstablishment=captive&degreeOfEstablishment=managed&limit=0&facet=country&facetLimit=60`);
   const captive: number = cap?.count ?? 0;
-  const total = all - captive;
-  if (total < 20) throw new Error(`only ${total} wild occurrences`);
+  // records of excluded subspecies come off the same way as captive ones
   const capBy = new Map<string, number>((cap?.facets?.[0]?.counts ?? []).map((c: any) => [c.name, c.count]));
+  let excluded = 0;
+  for (const ex of excludeKeys) {
+    const r = await getJSON(`${occBase(ex)}&limit=0&facet=country&facetLimit=60`);
+    excluded += r?.count ?? 0;
+    for (const c of r?.facets?.[0]?.counts ?? []) capBy.set(c.name, (capBy.get(c.name) ?? 0) + c.count);
+  }
+  const total = all - captive - excluded;
+  if (total < 20) throw new Error(`only ${total} wild occurrences`);
   const byCountry = (head.facets?.[0]?.counts ?? [])
     .map((c: any) => ({ name: c.name as string, count: c.count - (capBy.get(c.name) ?? 0) }))
     .filter((c: any) => c.count > 0)
     .sort((a: any, b: any) => b.count - a.count);
 
-  const { pts, datasets: dsCounts } = await samplePoints(key, all);
+  const { pts, datasets: dsCounts } = await samplePoints(key, all, new Set(excludeKeys));
   if (pts.length < 10) throw new Error('too few wild records in sample');
   await writeCells(key, pts);
 
@@ -93,6 +118,7 @@ async function occurrencePart(key: number) {
 
   return {
     v: 2,
+    excludedTaxa: excludeKeys, // cache only: rebuild the range part if this list changes
     iso,
     countries: cc.map((c: any) => ({ iso: c.name, share: Math.round((c.count / total) * 1000) / 1000 })),
     continents: [...new Set(iso.map((c: string) => isoInfo.get(c)!.continent))],
@@ -221,6 +247,8 @@ async function build(row: { scientific: string; wikipedia: string }) {
   const sci = row.scientific;
   const m = await getJSON(`${GBIF}/species/match?kingdom=Animalia&name=${encodeURIComponent(sci)}`);
   if (!m || !m.usageKey || m.matchType === 'NONE') throw new Error('no GBIF match');
+  // a name GBIF doesn't know falls back to its genus or family, which would map every relative as this animal
+  if (m.matchType === 'HIGHERRANK') throw new Error(`GBIF only matched the ${String(m.rank).toLowerCase()} ${m.canonicalName}`);
   const key: number = m.speciesKey ?? m.usageKey;
 
   const iucn = await getJSON(`${GBIF}/species/${key}/iucnRedListCategory`);
@@ -258,7 +286,7 @@ async function build(row: { scientific: string; wikipedia: string }) {
     }
   }
 
-  const occ = await occurrencePart(key);
+  const occ = await occurrencePart(key, EXCLUDE[sci]);
 
   return {
     id: key,
@@ -308,9 +336,9 @@ async function worker() {
             console.log('img ', row.scientific, `${size.w}x${size.h}`);
           } else console.log('img?', row.scientific, 'could not refetch photo');
         }
-        if (rec.v !== 2) {
-          // cached before captive records were filtered out: rebuild the range part only
-          Object.assign(rec, await occurrencePart(rec.id));
+        if (rec.v !== 2 || String(rec.excludedTaxa ?? []) !== String(EXCLUDE[row.scientific] ?? [])) {
+          // cached before captive records (or excluded subspecies) were filtered out: rebuild the range part only
+          Object.assign(rec, await occurrencePart(rec.id, EXCLUDE[row.scientific]));
           await writeFile(cacheFile, JSON.stringify(rec));
           console.log('occ ', row.scientific, `${rec.occurrences} wild, ${rec.captiveExcluded} captive left out`);
         }
@@ -333,6 +361,22 @@ await Promise.all(Array.from({ length: 6 }, worker));
 for (const s of out) s.group = GROUPS[s.group] ?? (s.group === 'Animal' ? 'Fish' : s.group);
 for (const s of out) s.states = await assignStates(s.points, s.iso);
 
+// Continents. Natural Earth files all of Russia under Europe, so Russian records are split at the Urals (60°E):
+// a Siberian tiger is in Asia. Each side counts if it holds at least 1.5% of the sample, like a country does.
+const continentOf = new Map<string, string>(countries.features.map((f: any) => [f.properties.iso, f.properties.continent]));
+for (const s of out) {
+  const set = new Set<string>(s.iso.filter((c: string) => c !== 'RU').map((c: string) => continentOf.get(c)!));
+  if (s.iso.includes('RU')) {
+    const ru = (s.points as Pt[]).filter((p) => p[2] === 'RU');
+    const west = ru.filter((p) => p[1] < 60).length;
+    if (west / s.points.length >= 0.015) set.add('Europe');
+    if ((ru.length - west) / s.points.length >= 0.015) set.add('Asia');
+    if (!ru.length) set.add('Europe'); // no sampled points to place it: keep what the country file says
+  }
+  for (const c of continentFixes.get(s.sci) ?? []) set.delete(c);
+  s.continents = [...set];
+}
+
 // Individual wild records for the "Points" view. Locations are rounded: ~1 km normally, ~11 km for critically
 // endangered and endangered animals, so the map never pinpoints where a threatened animal can be found.
 const SENSITIVE = new Set(['CR', 'EN', 'EW']);
@@ -352,7 +396,7 @@ for (const s of out) {
 }
 out.sort((a, b) => a.name.localeCompare(b.name));
 out.forEach((s, n) => (s.no = String(n + 1).padStart(3, '0')));
-const published = out.map(({ points, imgSrc, ...rest }) => rest);
+const published = out.map(({ points, imgSrc, excludedTaxa, ...rest }) => rest);
 await writeFile('public/data/species.json', JSON.stringify({ generated: new Date().toISOString(), species: published }));
 console.log(`\n${out.length} species written, ${failed.length} skipped`);
 await writeFile('.cache/_failed.txt', failed.join('\n')); // empty when nothing was skipped

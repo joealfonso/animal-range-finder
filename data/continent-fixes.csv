@@ -1,0 +1,17 @@
+scientific,drop
+# Continents where every record of the animal is a zoo or captive animal GBIF does not flag as one.
+# Checked by hand against each animal's records by country. Applied by npm run data.
+Ambystoma mexicanum,Europe
+Pan paniscus,Europe;North America
+Okapia johnstoni,Europe;North America
+Ailuropoda melanoleuca,Europe
+Diceros bicornis,North America
+Neofelis nebulosa,North America
+Ailurus fulgens,North America
+Panthera uncia,North America
+Tapirus indicus,North America
+Mandrillus sphinx,North America;South America
+Gorilla gorilla,North America
+Grus japonensis,Europe;North America
+Dendrobates tinctorius,North America
+Camelus bactrianus,Europe;North America
