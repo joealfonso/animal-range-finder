@@ -1,0 +1,12 @@
+// Cloudflare deploy config. The site is fully static: `npm run build` writes dist/, and Cloudflare serves those
+// files as-is. No Worker script. Having this file stops `wrangler deploy` from trying to auto-configure the project
+// (it would rewrite vite.config.ts to add a Workers plugin this site does not need).
+{
+  "name": "animal-range-finder",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "directory": "./dist"
+    // No single-page fallback on purpose: views live in the URL hash, and a missing data file must return a real
+    // 404, not index.html, or the app would try to parse HTML as JSON.
+  }
+}
