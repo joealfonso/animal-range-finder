@@ -1,0 +1,9 @@
+# Response headers Cloudflare adds to static files. Vite copies this into dist/, and Cloudflare reads it there
+# without serving it.
+#
+# Vite builds JS, CSS and fonts into /assets/ with a content hash in each name, so a changed file always gets a new
+# name and browsers can keep these for a year without checking back. Everything else (index.html, data/, img/,
+# tex/) keeps Cloudflare's default of revalidating on each use, because rerunning the data scripts changes those
+# files without renaming them.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
