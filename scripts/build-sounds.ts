@@ -1,6 +1,7 @@
 // Adds a short recording of each animal's call to public/data/species.json and writes public/sound/<gbif key>.mp3.
-// The recordings are picked by hand in data/sounds.csv (scientific name, Wikimedia Commons file, label), because a
-// search for "tiger" on Commons finds jazz and court arguments long before it finds a tiger. Each file is kept only if
+// The recordings are picked by hand in data/sounds.csv (scientific name, source, label), because a search for "tiger"
+// on Commons finds jazz and court arguments long before it finds a tiger. The source is a Wikimedia Commons file name
+// or an iNaturalist observation URL (its first freely licensed recording is used). Each file is kept only if
 // its licence is CC0, CC BY, CC BY-SA or public domain, like the photos. The loudest stretch of up to 12 seconds is cut
 // out, faded and levelled, so a long field recording plays the call itself and every animal plays at the same volume.
 // Runs after build-data in `npm run data`. Needs ffmpeg on the PATH (brew install ffmpeg). Finished clips are cached
@@ -69,7 +70,10 @@ async function loudest(file: string) {
   return { start: at / 4, dur };
 }
 
-async function build(sci: string, file: string, id: number): Promise<Omit<Sound, 'label'>> {
+type Source = { url: string; ext: string; credit: Sound['credit'] };
+
+/** A Wikimedia Commons file, by its name. */
+async function fromCommons(file: string): Promise<Source> {
   const info = await fetch(
     `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=extmetadata%7Curl&titles=${encodeURIComponent('File:' + file)}`,
     { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(25000) },
@@ -77,12 +81,52 @@ async function build(sci: string, file: string, id: number): Promise<Omit<Sound,
   const ii: any = (Object.values(info?.query?.pages ?? {})[0] as any)?.imageinfo?.[0];
   if (!ii) throw new Error(`no Commons file "${file}"`);
   const md = ii.extmetadata;
-  const license = clean(md?.LicenseShortName?.value ?? '');
-  if (!okLicense(license)) throw new Error(`licence "${license}" is not one we can redistribute`);
+  return {
+    url: ii.url,
+    ext: file.slice(file.lastIndexOf('.')),
+    credit: {
+      author: clean(md?.Artist?.value ?? '') || 'Unknown',
+      license: clean(md?.LicenseShortName?.value ?? ''),
+      licenseUrl: md?.LicenseUrl?.value ?? null,
+      page: ii.descriptionurl,
+    },
+  };
+}
 
-  const raw = `.cache/sounds/raw/${id}${file.slice(file.lastIndexOf('.'))}`;
+// iNaturalist licence codes; its current licences are the 4.0 versions
+const INAT: Record<string, [string, string]> = {
+  cc0: ['CC0', 'https://creativecommons.org/publicdomain/zero/1.0/'],
+  'cc-by': ['CC BY 4.0', 'https://creativecommons.org/licenses/by/4.0/'],
+  'cc-by-sa': ['CC BY-SA 4.0', 'https://creativecommons.org/licenses/by-sa/4.0/'],
+};
+
+/** The first freely licensed recording on an iNaturalist observation, by the observation's URL. */
+async function fromINat(url: string): Promise<Source> {
+  const obsId = url.match(/observations\/(\d+)/)?.[1];
+  if (!obsId) throw new Error(`not an iNaturalist observation: ${url}`);
+  const r = await fetch(`https://api.inaturalist.org/v1/observations/${obsId}`, {
+    headers: { 'User-Agent': UA },
+    signal: AbortSignal.timeout(25000),
+  }).then((res) => res.json());
+  const o = r?.results?.[0];
+  const snd = o?.sounds?.find((x: any) => INAT[x.license_code] && x.file_url);
+  if (!snd) throw new Error(`observation ${obsId} has no recording we can redistribute`);
+  const file = String(snd.file_url).split('?')[0];
+  const [license, licenseUrl] = INAT[snd.license_code];
+  return {
+    url: snd.file_url,
+    ext: file.slice(file.lastIndexOf('.')),
+    credit: { author: clean(o.user?.name || o.user?.login || '') || 'Unknown', license, licenseUrl, page: `https://www.inaturalist.org/observations/${obsId}` },
+  };
+}
+
+async function build(sci: string, file: string, id: number): Promise<Omit<Sound, 'label'>> {
+  const src = /^https?:\/\/(www\.)?inaturalist\.org\//.test(file) ? await fromINat(file) : await fromCommons(file);
+  if (!okLicense(src.credit.license)) throw new Error(`licence "${src.credit.license}" is not one we can redistribute`);
+
+  const raw = `.cache/sounds/raw/${id}${src.ext}`;
   if (!(await exists(raw))) {
-    await writeFile(raw, await download(ii.url));
+    await writeFile(raw, await download(src.url));
     await sleep(1500);
   }
   const { start, dur } = await loudest(raw);
@@ -94,16 +138,7 @@ async function build(sci: string, file: string, id: number): Promise<Omit<Sound,
     '-ac', '1', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '80k', `${PUB}/sound/${id}.mp3`,
   ]);
   console.log('ok  ', sci, `${len.toFixed(1)}s from ${start.toFixed(1)}s of ${dur.toFixed(1)}s`);
-  return {
-    src: `sound/${id}.mp3`,
-    dur: Math.round(len * 10) / 10,
-    credit: {
-      author: clean(md?.Artist?.value ?? '') || 'Unknown',
-      license,
-      licenseUrl: md?.LicenseUrl?.value ?? null,
-      page: ii.descriptionurl,
-    },
-  };
+  return { src: `sound/${id}.mp3`, dur: Math.round(len * 10) / 10, credit: src.credit };
 }
 
 // a quoted field may hold commas: Commons file names often do

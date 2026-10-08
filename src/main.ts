@@ -760,7 +760,7 @@ async function boot() {
         <button type="button" data-action="sound" aria-pressed="${playingId === s.id}">
           <span class="hear-icon" aria-hidden="true"></span>Hear its ${esc(a.label)}<span class="hear-dur">${Math.max(1, Math.round(a.dur))}s</span>
         </button>
-        <p class="hear-credit">Sound ${c.author !== 'Unknown' ? `${esc(c.author)}, ` : ''}${extLink(c.licenseUrl ?? c.page, esc(c.license))}, ${extLink(c.page, 'Commons')}</p>
+        <p class="hear-credit">Sound ${c.author !== 'Unknown' ? `${esc(c.author)}, ` : ''}${extLink(c.licenseUrl ?? c.page, esc(c.license))}, ${extLink(c.page, c.page.includes('inaturalist.org') ? 'iNaturalist' : 'Commons')}</p>
       </div>`;
   }
 
