@@ -1,7 +1,7 @@
 import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
-import { createHeat } from './heat';
+import { createDetailHeat, createHeat } from './heat';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -241,6 +241,19 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   let rangeMode: 'heat' | 'points' = 'heat';
   let hasRange = false;
 
+  // Zoomed in, the world heatmap (2° cells, banded against the whole range) is too coarse: it blurs past the records
+  // and loses places with a modest share of them. Below DETAIL_ALT the heat is redrawn from the records around the
+  // view whenever the camera settles somewhere new (see the frame loop).
+  const DETAIL_ALT = 0.9;
+  const SETTLE_MS = 160;
+  const detail = createDetailHeat(R);
+  scene.add(detail.mesh);
+  let rangePts: number[][] = [];
+  let detailOn = false; // the detail layer is drawn for roughly the current view and is showing instead of the world one
+  let drawnAt: { lat: number; lng: number; altitude: number; halfSpan: number } | null = null;
+  let lastMoveT = 0;
+  let detailCheck = false; // the camera moved (or the range changed) since the detail layer was last looked at
+
   // Points: one draw call for all records; a fixed size on screen so single records stay legible when zoomed in.
   const POINT_PX = { range: 3.2, country: 4.2, state: 5.5 };
   let pointPx = POINT_PX.range;
@@ -272,7 +285,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   scene.add(records);
 
   const applyMode = () => {
-    heat.setVisible(hasRange && rangeMode === 'heat');
+    heat.setVisible(hasRange && rangeMode === 'heat' && !detailOn);
+    detail.setVisible(hasRange && rangeMode === 'heat' && detailOn);
     records.visible = hasRange && rangeMode === 'points';
   };
   const setPointSize = () => (recMat.uniforms.size.value = pointPx * dpr);
@@ -438,6 +452,48 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     camera.updateProjectionMatrix();
   }
 
+  /** Keep the detail layer in step with the camera: drop it when zoomed out, redraw it once a move has settled. */
+  function updateDetail(now: number, moved: boolean) {
+    if (!hasRange || rangeMode !== 'heat') return;
+    if (moved) {
+      lastMoveT = now;
+      detailCheck = true;
+    }
+    if (!detailCheck) return;
+    const p = globe.pointOfView();
+    if (p.altitude >= DETAIL_ALT) {
+      detailCheck = false;
+      if (detailOn) {
+        detailOn = false;
+        applyMode();
+      }
+      return;
+    }
+    if (now - lastMoveT < SETTLE_MS) return; // still moving: the drawn patch stays put on the globe until then
+    detailCheck = false;
+    const d = drawnAt;
+    const cos = Math.cos((p.lat * Math.PI) / 180);
+    const dLng = ((((p.lng - (d?.lng ?? 0)) % 360) + 540) % 360) - 180;
+    const fresh =
+      d &&
+      p.altitude / d.altitude > 0.8 &&
+      p.altitude / d.altitude < 1.25 &&
+      Math.hypot(p.lat - d.lat, dLng * cos) < d.halfSpan * 0.3;
+    if (!fresh) {
+      // about 1.5x what is in view, so a short pan (or the phone layout's lifted globe) doesn't reach the edge
+      // before the redraw; wider on wide screens
+      const halfSpan = Math.min(80, p.altitude * 30 * Math.max(1, window.innerWidth / window.innerHeight) * 1.5);
+      // smoothing follows the zoom: ~35 km at the closest zoom, ~90 km at the switch-over
+      const sigma = Math.max(0.12, p.altitude * 0.9);
+      detail.draw(rangePts, p.lat, p.lng, halfSpan, sigma);
+      drawnAt = { lat: p.lat, lng: p.lng, altitude: p.altitude, halfSpan };
+    }
+    if (!detailOn) {
+      detailOn = true;
+      applyMode();
+    }
+  }
+
   // ---- frame loop, with a guard that lowers resolution if frames stay slow
   const t0 = performance.now();
   const lastCam = new THREE.Matrix4();
@@ -448,6 +504,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     camera.updateMatrixWorld();
     const moved = !lastCam.equals(camera.matrixWorld);
     if (moved) lastCam.copy(camera.matrixWorld);
+    updateDetail(now, moved);
     for (const cb of frameCbs) cb(moved);
     // the globe turned under a still pointer (auto-rotate, a fly-to): what is under it may have changed
     if (moved && pointer && !hoverQueued && !dragging) {
@@ -512,6 +569,11 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       hasRange = cells.length > 0 || points.length > 0;
       if (cells.length) heat.show(cells);
       setRecords(points);
+      // a new animal: whatever detail was drawn belongs to the last one
+      rangePts = points;
+      drawnAt = null;
+      detailOn = false;
+      detailCheck = true;
       applyMode();
     },
     clearRange() {
@@ -521,6 +583,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     },
     setRangeMode(mode) {
       rangeMode = mode;
+      detailCheck = true;
       applyMode();
     },
     project(lat, lng) {
