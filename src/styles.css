@@ -1016,6 +1016,8 @@ kbd {
     top: auto;
     bottom: 186px; /* clear of the finder, which now always shows the Place row */
     height: 30vh;
+    /* inset the rows from the panel's edges; the left inset also leaves room for the active-row marker, which hangs 14px outside the row */
+    padding: 18px 14px 18px 20px;
     background: rgba(6, 7, 10, 0.88);
   }
   #results li .nm {
