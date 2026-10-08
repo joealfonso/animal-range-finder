@@ -87,6 +87,15 @@ for (const s of species) {
   }
 }
 
+// the "What lives here" index has to list the same animals, or a pin would miss some of them
+const nearPath = `${PUB}/data/near.json`;
+if (!(await exists(nearPath))) fail('near.json', `${nearPath} is missing; run npx tsx scripts/build-near.ts`);
+else {
+  const near = await readJSON(nearPath);
+  const want = species.map((s) => s.id).join(',');
+  if (!Array.isArray(near.ids) || near.ids.join(',') !== want) fail('near.json', 'is out of date with species.json; run npx tsx scripts/build-near.ts');
+}
+
 if (problems.length) {
   console.error(`Data check failed, ${problems.length} problem${problems.length === 1 ? '' : 's'}:`);
   for (const p of problems) console.error('  ' + p);

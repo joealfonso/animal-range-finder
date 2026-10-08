@@ -7,7 +7,8 @@ import './styles.css';
 import { createStage } from './stage';
 import { createSearch, type Filters } from './search';
 import { HEAT_BANDS } from './heat';
-import { annotateCountry, countryPov, rangePov } from './geo';
+import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
+import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
 import { STATUS_LABEL, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
 
 const BASE = import.meta.env.BASE_URL;
@@ -19,6 +20,7 @@ const extLink = (url: string, html: string) =>
   /^https?:\/\//i.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${html}</a>` : html;
 const nf = new Intl.NumberFormat('en-US');
 const plural = (n: number, one: string, many: string) => `${nf.format(n)} ${n === 1 ? one : many}`;
+const fmtKm = (km: number) => (km < 1 ? 'under 1 km' : `${nf.format(Math.round(km))} km`);
 /** The name as it would appear mid-sentence: "lion", but "American alligator". Taken from how the description writes it. */
 function midSentence(name: string, desc: string) {
   const re = new RegExp(`[^.!?]\\s(${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i');
@@ -31,9 +33,12 @@ function midSentence(name: string, desc: string) {
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const small = matchMedia('(max-width: 800px)').matches || (navigator.hardwareConcurrency ?? 8) <= 2;
 const wide = () => window.innerWidth > 900;
-/** On phones the sheet covers the lower half, so the globe is lifted into the space above it. */
-const offset = (plateOpen: boolean): [number, number] =>
-  wide() ? [plateOpen ? 40 : 0, 0] : [0, Math.round(window.innerHeight * (plateOpen ? 0.27 : 0.2))];
+/**
+ * On phones the sheet covers the lower half, so the globe is lifted into the space above it. With a pin down and no
+ * sheet, it is lifted further so the pin (at the centre) sits above the animal list instead of behind it.
+ */
+const offset = (plateOpen: boolean, pinned = false): [number, number] =>
+  wide() ? [plateOpen ? 40 : 0, 0] : [0, Math.round(window.innerHeight * (plateOpen ? 0.27 : pinned ? 0.33 : 0.2))];
 
 const CONTINENT_SHORT: Record<string, string> = {
   Africa: 'Africa',
@@ -103,6 +108,20 @@ async function boot() {
   let frameDirty = true;
   let blockersDirty = true; // the text panels around the globe moved or changed size
   let cache = new Map<number, Cell[]>();
+  // "What lives here": a point (a dropped pin, or where the visitor is) and the animals with a sampled record near it.
+  // hits is null while the distances are being measured. The point stays in the page: it is never put in the URL or sent.
+  // continent: the pin's, to spot animals recorded far from where they live (null out at sea)
+  let near: {
+    lat: number;
+    lng: number;
+    label: string;
+    you: boolean;
+    continent: string | null;
+    hits: Map<number, NearHit> | null;
+  } | null = null;
+  let nearToken = 0;
+  let pinArmed = false; // the next click on the globe drops the pin
+  let nearNote = ''; // why it could not run (location refused...), shown in the Place row
 
   // ---------- elements ----------
   const q = $<HTMLInputElement>('q');
@@ -132,7 +151,7 @@ async function boot() {
           <span class="no">${s.no}</span>
           <span class="nm">${esc(s.name)}</span>
           <span class="st" title="${STATUS_LABEL[s.status] ?? ''}">${s.status}</span>
-          <span class="la">${esc(s.sci)}</span>
+          <span class="la">${esc(s.sci)}${nearKm(s)}</span>
         </li>`,
       )
       .join('');
@@ -142,8 +161,28 @@ async function boot() {
     q.setAttribute('aria-activedescendant', list[activeIdx] ? `opt-${list[activeIdx].id}` : '');
   }
 
+  function nearKm(s: Species) {
+    const hit = near?.hits?.get(s.id);
+    return hit ? `<span class="km"> · ${fmtKm(hit.km)}</span>${offRange(s) ? '<span class="off"> · unusual here</span>' : ''}` : '';
+  }
+
+  /**
+   * The pin is on a continent the animal isn't listed on (same continents as the "Where" filter): few of its records
+   * come from here. Often a zoo, park or escaped animal GBIF doesn't flag (a ring-tailed lemur in France), but
+   * continents follow where records are, so it can also be a real but rarely recorded part of its range.
+   */
+  function offRange(s: Species) {
+    return !!near?.continent && !s.continents.includes(near.continent);
+  }
+
   /** Why the list is empty. A place with no animals is a gap in the sampled records, not a search the user got wrong. */
   function emptyMessage() {
+    if (near) {
+      if (!near.hits) return 'Measuring how far each animal’s nearest wild record is…';
+      if (!near.hits.size)
+        return `No animal in the catalogue has a sampled wild record within ${NEAR_KM} km of ${near.you ? 'you' : 'this pin'}. Out at sea, or somewhere few people record wildlife, that is expected. Drop the pin somewhere else, or clear it with ✕ below.`;
+      return 'None of the animals near here match that. Try fewer filters.';
+    }
     const placeOnly = run('', { continent: null, status: null, country: filters.country, state: filters.state });
     if (filters.state && !placeOnly.length)
       return `No sampled records place an animal in ${stateName(filters.state)}. States come from a sample of each animal's records, so smaller ones are often empty. Pick another state, or clear it with ✕ below.`;
@@ -164,6 +203,10 @@ async function boot() {
 
   function refresh() {
     list = run(q.value, filters);
+    if (near) {
+      const hits = near.hits;
+      list = hits ? list.filter((s) => hits.has(s.id)).sort((a, b) => hits.get(a.id)!.km - hits.get(b.id)!.km) : [];
+    }
     activeIdx = 0;
     renderIndex();
     renderFilters();
@@ -184,15 +227,20 @@ async function boot() {
         .map((c) => btn('status', c, c, filters.status === c, STATUS_LABEL[c]))
         .join('')}<button type="button" class="info" data-kind="key" aria-expanded="${statusKeyOpen}" aria-controls="status-key"
           aria-label="What the status codes mean" title="What the status codes mean">i</button></div>
-      <div class="frow place${filters.country ? ' is-set' : ''}"><span class="flabel">Place</span>${
-        filters.country
+      <div class="frow place${filters.country || near || pinArmed ? ' is-set' : ''}"><span class="flabel">Place</span>${
+        near
+          ? btn('near', null, `${near.you ? 'Near you' : near.label ? `Pin in ${near.label}` : 'Pin at sea'} ✕`, true) +
+            `<span class="hint">${near.hits ? `${plural(near.hits.size, 'animal', 'animals')} recorded within ${NEAR_KM} km` : 'measuring…'}</span>`
+          : pinArmed
+            ? `<span class="hint">click anywhere on the globe</span>${btn('pin-cancel', null, 'Cancel', false)}`
+            : filters.country
           ? btn('country', null, `${isoName(filters.country)} ✕`, true) +
             (filters.state
               ? `<span class="crumb" aria-hidden="true">›</span>${btn('state', null, `${stateName(filters.state)} ✕`, true)}`
               : stateIndex[filters.country]
                 ? '<span class="hint">now pick a state on the globe</span>'
                 : '')
-          : '<span class="hint">click a country on the globe, then a state</span>'
+          : `${btn('locate', null, 'Near me', false, 'Animals recorded near you. Your location stays in this page.')}${btn('pin', null, 'Drop a pin', false, 'Animals recorded near any spot you click')}${nearNote ? `<span class="hint is-note">${esc(nearNote)}</span>` : '<span class="hint">or click a country, then a state</span>'}`
       }</div>
       <div class="status-key" id="status-key" role="note"${statusKeyOpen ? '' : ' hidden'}>
         <dl>${statuses.map((c) => `<div><dt>${c}</dt><dd>${STATUS_LABEL[c]}</dd></div>`).join('')}</dl>
@@ -210,6 +258,10 @@ async function boot() {
     const b = (e.target as HTMLElement).closest('button');
     if (!b) return;
     if (b.dataset.kind === 'key') return setStatusKey(!statusKeyOpen);
+    if (b.dataset.kind === 'near') return clearNear();
+    if (b.dataset.kind === 'locate') return locate();
+    if (b.dataset.kind === 'pin') return armPin(true);
+    if (b.dataset.kind === 'pin-cancel') return armPin(false);
     const kind = b.dataset.kind as keyof Filters;
     const value = b.dataset.value || null;
     if (kind === 'continent' && value && filters.continent !== value) return pickContinent(value);
@@ -307,6 +359,7 @@ async function boot() {
     // Zoomed into a place? Stay there: from a country/state filter, or while another animal is open at a place.
     const fromFilter = (!selected || opts.placeChanged) && filters.country ? { iso: filters.country, state: filters.state } : null;
     const keep = fromFilter ?? (selected && activeCountry ? { iso: activeCountry, state: activeState } : null);
+    const atPin = !!near && !keep; // opened from the list of animals near a pin: stay at the pin
     if (!selected) animalHome = stage.pov();
     if (fromFilter) placeEntry = fromFilter;
     else if (!keep || !placeEntry || keep.iso !== placeEntry.iso || keep.state !== placeEntry.state) placeEntry = null;
@@ -332,7 +385,7 @@ async function boot() {
     shownPoints = pts.length;
     if (rangeMode === 'points') renderPlate(); // the legend counts the points
     animalPov = rangePov(cells);
-    if (!keep && !opts.stay) flyTwoStage(animalPov);
+    if (!keep && !opts.stay && !atPin) flyTwoStage(animalPov);
   }
 
   /** From a country or state, zoom out to everywhere the open animal lives. */
@@ -363,7 +416,7 @@ async function boot() {
     blockersDirty = true;
     document.body.classList.remove('has-plate');
     hideLeader();
-    stage.shiftTo(...offset(false), 600);
+    stage.shiftTo(...offset(false, !!near), 600);
     history.replaceState(null, '', location.pathname + location.search);
     renderIndex();
     if (animalHome) fly(animalHome, 1500);
@@ -428,6 +481,7 @@ async function boot() {
    */
   function pickContinent(name: string) {
     filters.continent = name;
+    if (near) dropNear();
     if (filters.country) {
       filters.country = null;
       filters.state = null;
@@ -478,6 +532,10 @@ async function boot() {
       setStatusKey(false);
       return true;
     }
+    if (pinArmed) {
+      armPin(false);
+      return true;
+    }
     if (selected && placeEntry && activeCountry === placeEntry.iso && activeState === placeEntry.state) {
       deselect(); // opened from this place: close and stay here
       return true;
@@ -501,6 +559,10 @@ async function boot() {
       deselect();
       return true;
     }
+    if (near) {
+      clearNear();
+      return true;
+    }
     if (filters.state) {
       clearStateFilter();
       return true;
@@ -520,7 +582,8 @@ async function boot() {
       return;
     }
     if (filters.country === iso) return;
-    if (!filters.country) filterHome = stage.pov();
+    if (near) dropNear(); // a country replaces the pin; filterHome still holds the view from before the pin
+    if (!filters.country && !filterHome) filterHome = stage.pov();
     filters.country = iso;
     filters.state = null;
     stage.stopAutoRotate();
@@ -621,6 +684,7 @@ async function boot() {
       </div>
       <p class="desc">${esc(s.desc)}</p>
       <dl class="facts">
+        ${nearFact(s)}
         <div><dt>Range</dt><dd><ul class="range-list">${s.countries
           .map(
             (x) =>
@@ -655,6 +719,22 @@ async function boot() {
     plate.hidden = false;
     if (focusedIso) plate.querySelector<HTMLElement>(`button[data-iso="${focusedIso}"]`)?.focus();
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();
+  }
+
+  /** With a pin down: how close this animal's nearest sampled record is to it. */
+  function nearFact(s: Species) {
+    const hit = near?.hits?.get(s.id);
+    if (!near || !hit) return '';
+    const where = near.you ? 'you' : 'your pin';
+    return `<div class="near-fact"><dt>Near</dt><dd><strong>${fmtKm(hit.km)}</strong> from ${where} to its nearest sampled wild record${
+      hit.close ? `, with ${plural(hit.close, 'record', 'records')} within ${CLOSE_KM} km` : ''
+    }.<p class="note">${
+      offRange(s)
+        ? `Few of its sampled records come from ${esc(near.continent!)}. Records like these are often zoo, park or escaped animals that GBIF doesn’t flag, or a part of its range that people rarely record. `
+        : ''
+    }${
+      s.pointsRounding === 0.1 ? 'Records of this threatened animal are rounded to about 11 km, so the distance is too. ' : ''
+    }A sample of records, not every sighting: it could well be closer.</p></dd></div>`;
   }
 
   plate.addEventListener('click', (e) => {
@@ -775,6 +855,109 @@ async function boot() {
     leaderSvg.classList.add('on');
   });
 
+  // ---------- what lives here ----------
+  const findNear = createNear(BASE, byId, loadPoints);
+  const pickCountries = countries.map(toPickable);
+  const here = document.createElement('div');
+  here.className = 'here';
+  here.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(here);
+
+  function armPin(on: boolean) {
+    pinArmed = on;
+    nearNote = '';
+    stage.setPinMode(on);
+    renderFilters();
+    filtersEl.querySelector<HTMLElement>(`button[data-kind="${on ? 'pin-cancel' : 'pin'}"]`)?.focus();
+  }
+
+  async function setNear(lat: number, lng: number, you: boolean) {
+    if (pinArmed) {
+      pinArmed = false;
+      stage.setPinMode(false);
+    }
+    if (selected) {
+      animalHome = null; // close the animal where we are; the camera is about to fly to the pin
+      deselect();
+    }
+    if (filters.country) {
+      filters.country = null;
+      filters.state = null;
+      stage.setFilterCountry(null);
+      syncOpenCountry();
+    }
+    if (!filterHome) filterHome = stage.pov(); // Esc clears the pin and comes back here
+    const token = ++nearToken;
+    const place = pickAt(pickCountries, lat, lng);
+    // Natural Earth files all of Russia under Europe; the catalogue splits it at the Urals (60°E), so do the same
+    const continent = !place || /^Seven seas/.test(place.properties.continent)
+      ? null
+      : place.properties.iso === 'RU'
+        ? lng >= 60 ? 'Asia' : 'Europe'
+        : place.properties.continent;
+    const point = { lat, lng, you, continent, label: place?.properties.name ?? '', hits: null as Map<number, NearHit> | null };
+    near = point;
+    nearNote = '';
+    flightToken++;
+    stage.stopAutoRotate();
+    fly({ lat, lng, altitude: 0.34 }, 1400);
+    stage.shiftTo(...offset(false, true), 600);
+    refresh();
+    try {
+      point.hits = await findNear(lat, lng);
+    } catch (err) {
+      console.error(err);
+      if (token !== nearToken) return;
+      dropNear();
+      nearNote = 'The list of nearby animals could not be loaded.';
+      return refresh();
+    }
+    if (token === nearToken) refresh();
+  }
+
+  /** Forget the pin without moving the camera (something else is taking over the view). */
+  function dropNear() {
+    nearToken++;
+    near = null;
+    if (!selected) stage.shiftTo(...offset(false), 600); // phones: the globe no longer needs lifting above the list
+  }
+
+  function clearNear() {
+    dropNear();
+    if (!selected && filterHome) fly(filterHome, 1300);
+    filterHome = null;
+    refresh();
+    filtersEl.querySelector<HTMLElement>('button[data-kind="pin"]')?.focus();
+  }
+
+  function locate() {
+    if (!('geolocation' in navigator)) {
+      nearNote = 'This browser can’t share a location. Drop a pin instead.';
+      return renderFilters();
+    }
+    nearNote = 'finding you…';
+    renderFilters();
+    navigator.geolocation.getCurrentPosition(
+      (p) => setNear(p.coords.latitude, p.coords.longitude, true),
+      (err) => {
+        nearNote =
+          err.code === err.PERMISSION_DENIED
+            ? 'Location is off for this page. Drop a pin instead.'
+            : 'Couldn’t find your location. Drop a pin instead.';
+        renderFilters();
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 10 * 60 * 1000 },
+    );
+  }
+
+  stage.onPinDrop((lat, lng) => setNear(lat, lng, false));
+  stage.onFrame(() => {
+    if (!near) return void here.classList.remove('on');
+    const pt = stage.project(near.lat, near.lng);
+    here.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px)`;
+    here.classList.toggle('on', pt.visible);
+  });
+
   // ---------- readout ----------
   let readoutQueued = false;
   stage.onMove((p) => {
@@ -840,7 +1023,7 @@ async function boot() {
   });
   window.addEventListener('resize', () => {
     stage.resize();
-    stage.shiftTo(...offset(!!selected), 0);
+    stage.shiftTo(...offset(!!selected, !!near), 0);
   });
 
   // ---------- go ----------

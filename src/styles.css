@@ -233,6 +233,19 @@ kbd {
   font-size: 14.5px;
   color: var(--ink-3);
 }
+#results li .km {
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+#results li .off {
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
 #results li.is-active .nm {
   color: var(--ink);
 }
@@ -788,6 +801,64 @@ kbd {
   color: var(--accent);
 }
 
+/* the "What lives here" pin: a dot with a slow ring, so it reads as a place, not a record */
+.here {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  will-change: transform;
+}
+.here.on {
+  opacity: 1;
+}
+.here::before,
+.here::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.here::before {
+  width: 9px;
+  height: 9px;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 8px #000;
+}
+.here::after {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--accent);
+  animation: here-ring 2.4s ease-out infinite;
+}
+@keyframes here-ring {
+  from {
+    width: 10px;
+    height: 10px;
+    opacity: 1;
+  }
+  to {
+    width: 54px;
+    height: 54px;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .here::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+.near-fact strong {
+  font-weight: 400;
+  color: var(--accent);
+}
+
 /* ---------- credits ---------- */
 
 .colophon-btn {
@@ -930,8 +1001,8 @@ kbd {
     white-space: nowrap;
     padding: 4px 0;
   }
-  /* on phones the place row only appears once something is picked, so it can be cleared */
-  .frow.place:not(.is-set) {
+  /* on phones the place row keeps only Near me / Drop a pin until something is picked; countries are picked on the globe */
+  .frow.place:not(.is-set) .hint:not(.is-note) {
     display: none;
   }
   .frow button {
@@ -943,7 +1014,7 @@ kbd {
     right: var(--edge);
     width: auto;
     top: auto;
-    bottom: 160px;
+    bottom: 186px; /* clear of the finder, which now always shows the Place row */
     height: 30vh;
     background: rgba(6, 7, 10, 0.88);
   }
