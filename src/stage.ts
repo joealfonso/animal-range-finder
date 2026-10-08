@@ -33,6 +33,8 @@ export interface Stage {
   onCountryClick(cb: (iso: string) => void): void;
   onStateClick(cb: (id: string) => void): void;
   onMove(cb: (p: Pov) => void): void;
+  /** the user grabbed the globe (drag, scroll, pinch): any scripted camera move has been cancelled */
+  onUserControl(cb: () => void): void;
   /** called every frame; `moved` is false when the camera has not changed since the last frame */
   onFrame(cb: (moved: boolean) => void): void;
   resize(): void;
@@ -113,6 +115,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   let clickCb: (iso: string) => void = () => {};
   let stateClickCb: (id: string) => void = () => {};
   let moveCb: (p: Pov) => void = () => {};
+  let userCb: () => void = () => {};
+  let flyingUntil = 0;
   const frameCbs: ((moved: boolean) => void)[] = [];
 
   const globe = new Globe(el, {
@@ -279,9 +283,30 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   document.body.appendChild(tip);
   const canvas = renderer.domElement;
 
-  function pickAtScreen(clientX: number, clientY: number) {
+  // Screen point -> lat/lng through the real camera. globe.gl's toGlobeCoords ignores the view offset we use to
+  // keep the globe clear of the panels, which put clicks and hover up to ~150px away from where you pointed.
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const hitP = new THREE.Vector3();
+  function screenToLatLng(clientX: number, clientY: number) {
     const r = canvas.getBoundingClientRect();
-    const ll = globe.toGlobeCoords(clientX - r.left, clientY - r.top);
+    ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const o = ray.ray.origin;
+    const d = ray.ray.direction;
+    const b = o.dot(d);
+    const disc = b * b - (o.lengthSq() - R * R);
+    if (disc < 0) return null; // missed the globe
+    hitP.copy(d).multiplyScalar(-b - Math.sqrt(disc)).add(o);
+    const lat = 90 - (Math.acos(Math.max(-1, Math.min(1, hitP.y / R))) * 180) / Math.PI;
+    let lng = 90 - (Math.atan2(hitP.z, hitP.x) * 180) / Math.PI;
+    if (lng > 180) lng -= 360;
+    if (lng < -180) lng += 360;
+    return { lat, lng };
+  }
+
+  function pickAtScreen(clientX: number, clientY: number) {
+    const ll = screenToLatLng(clientX, clientY);
     if (!ll) return null;
     if (pickStates.length) {
       const s = pickAt(pickStates, ll.lat, ll.lng);
@@ -360,7 +385,16 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   controls.minDistance = 118;
   controls.maxDistance = 520;
   controls.zoomSpeed = 0.7;
-  controls.addEventListener('start', () => (controls.autoRotate = false));
+  controls.addEventListener('start', () => {
+    controls.autoRotate = false;
+    // Your hand wins: stop a fly-to where it is instead of letting it pull the camera back.
+    // (pointOfView with no duration ends the running tween, then puts the camera back at the current spot.)
+    if (performance.now() < flyingUntil) {
+      flyingUntil = 0;
+      globe.pointOfView(globe.pointOfView(), 0);
+    }
+    userCb();
+  });
   controls.addEventListener('change', () => moveCb(globe.pointOfView()));
 
   globe.pointOfView({ lat: 18, lng: 20, altitude: small ? 3.4 : 2.45 }, 0);
@@ -416,7 +450,9 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     flyTo(p, ms) {
       controls.autoRotate = false;
       tip.classList.remove('on');
-      globe.pointOfView(p, reduced ? 0 : ms);
+      const d = reduced ? 0 : ms;
+      flyingUntil = performance.now() + d;
+      globe.pointOfView(p, d);
     },
     setRangeCountries(iso, active) {
       rangeIso = iso;
@@ -482,6 +518,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     onCountryClick: (cb) => (clickCb = cb),
     onStateClick: (cb) => (stateClickCb = cb),
     onMove: (cb) => (moveCb = cb),
+    onUserControl: (cb) => (userCb = cb),
     onFrame: (cb) => frameCbs.push(cb),
     resize() {
       globe.width(window.innerWidth).height(window.innerHeight);

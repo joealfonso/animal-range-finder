@@ -66,6 +66,9 @@ async function boot() {
   let selected: Species | null = null;
   let activeCountry: string | null = null;
   let activeState: string | null = null; // a state inside activeCountry, while an animal is open
+  // The place you were looking at when you opened the animal from a filtered list. Esc there closes the animal
+  // and leaves you where you were, instead of stepping out through country and range.
+  let placeEntry: { iso: string; state: string | null } | null = null;
   // Where the camera was before we moved it, one for each layer Back can undo.
   let animalHome: Pov | null = null;
   let filterHome: Pov | null = null;
@@ -237,15 +240,20 @@ async function boot() {
   }
 
   async function select(s: Species) {
+    // Zoomed into a place? Stay there: from a country/state filter, or while another animal is open at a place.
+    const fromFilter = !selected && filters.country ? { iso: filters.country, state: filters.state } : null;
+    const keep = fromFilter ?? (selected && activeCountry ? { iso: activeCountry, state: activeState } : null);
     if (!selected) animalHome = stage.pov();
+    if (fromFilter) placeEntry = fromFilter;
+    else if (!keep || !placeEntry || keep.iso !== placeEntry.iso || keep.state !== placeEntry.state) placeEntry = null;
     stage.stopAutoRotate();
     selected = s;
-    activeCountry = null;
-    activeState = null;
+    activeCountry = keep?.iso ?? null;
+    activeState = keep?.state ?? null;
     const idx = list.findIndex((x) => x.id === s.id);
     if (idx >= 0) activeIdx = idx;
     history.replaceState(null, '', `#${s.id}`);
-    stage.setRangeCountries(s.iso, null);
+    stage.setRangeCountries(s.iso, activeCountry);
     syncOpenCountry();
     renderIndex();
     renderPlate();
@@ -257,6 +265,18 @@ async function boot() {
     if (selected?.id !== s.id) return;
     stage.showRange(cells);
     animalPov = rangePov(cells);
+    if (!keep) flyTwoStage(animalPov);
+  }
+
+  /** From a country or state, zoom out to everywhere the open animal lives. */
+  function showFullRange() {
+    if (!selected || !animalPov) return;
+    activeCountry = null;
+    activeState = null;
+    placeEntry = null;
+    stage.setRangeCountries(selected.iso, null);
+    syncOpenCountry();
+    renderPlate();
     flyTwoStage(animalPov);
   }
 
@@ -265,6 +285,7 @@ async function boot() {
     selected = null;
     activeCountry = null;
     activeState = null;
+    placeEntry = null;
     animalPov = null;
     stage.clearRange();
     stage.setRangeCountries([], null);
@@ -334,6 +355,10 @@ async function boot() {
       closeCredits();
       return true;
     }
+    if (selected && placeEntry && activeCountry === placeEntry.iso && activeState === placeEntry.state) {
+      deselect(); // opened from this place: close and stay here
+      return true;
+    }
     if (activeState && selected && activeCountry) {
       activeState = null;
       syncOpenCountry();
@@ -366,7 +391,8 @@ async function boot() {
 
   stage.onCountryClick((iso) => {
     if (selected) {
-      if (iso !== activeCountry && (selected.iso.includes(iso) || selected.states.some((x) => x.iso === iso))) zoomCountry(iso);
+      // any country, not just the range: the plate says how many records come from it, even none
+      if (iso !== activeCountry) zoomCountry(iso);
       return;
     }
     if (filters.country === iso) return;
@@ -380,6 +406,9 @@ async function boot() {
     if (c) fly(countryPov(c), 1300);
     refresh();
   });
+
+  // grabbing the globe also cancels the second half of a two-stage fly-in
+  stage.onUserControl(() => flightToken++);
 
   stage.onStateClick((id) => {
     const current = selected ? activeState : filters.state;
@@ -420,7 +449,8 @@ async function boot() {
     const stateHit = activeState ? s.states.find((x) => x.id === activeState) : null;
     const lower = esc(midSentence(s.name, s.desc));
     const SHOW = 14;
-    const statesBlock = activeCountry
+    // the per-state list only makes sense inside the animal's range; elsewhere the note says it is (nearly) absent
+    const statesBlock = activeCountry && s.iso.includes(activeCountry)
       ? inCountry.length
         ? `<p class="sub">In ${esc(isoName(activeCountry))}</p><ul class="range-list states">${inCountry
             .slice(0, SHOW)
@@ -431,13 +461,21 @@ async function boot() {
             .join('')}${inCountry.length > SHOW ? `<li class="more">and ${inCountry.length - SHOW} more</li>` : ''}</ul>`
         : `<p class="note">No sampled records place it in a particular state of ${esc(isoName(activeCountry))}.</p>`
       : '';
+    // where Esc goes from here: back to the list you came from, or one level out
+    const atEntry = !!placeEntry && placeEntry.iso === activeCountry && placeEntry.state === activeState;
+    const escHint = atEntry ? 'Esc closes it and keeps you here.' : `Esc pulls back to ${esc(isoName(activeCountry ?? ''))}.`;
     const note = activeState
       ? stateHit
-        ? `${Math.round(stateHit.share * 1000) / 10}% of the sampled ${lower} records are from ${esc(stateHit.name)}. Esc pulls back to ${esc(isoName(activeCountry!))}.`
-        : `None of the sampled ${lower} records are from ${esc(stateName(activeState))}. Esc pulls back.`
+        ? `${Math.round(stateHit.share * 1000) / 10}% of the sampled ${lower} records are from ${esc(stateHit.name)}. ${escHint}`
+        : `None of the sampled ${lower} records are from ${esc(stateName(activeState))}. ${escHint}`
       : active
-        ? `${Math.round(active.share * 100)}% of ${lower} records are from ${esc(isoName(active.iso))}. Pick a state below or on the globe, or press Esc to pull back.`
-        : 'Choose a country, or click one outlined on the globe, to look closer.';
+        ? `${Math.round(active.share * 100)}% of ${lower} records are from ${esc(isoName(active.iso))}. Pick a state below or on the globe${atEntry ? '; Esc closes it and keeps you here.' : ', or press Esc to pull back.'}`
+        : activeCountry
+          ? `Few or no wild ${lower} records come from ${esc(isoName(activeCountry))}.`
+          : 'Choose a country, or click one outlined on the globe, to look closer.';
+    const fullRange = activeCountry
+      ? `<p class="note"><button type="button" class="textlink" data-action="full-range">See its whole range</button></p>`
+      : '';
     plate.innerHTML = `
       <button class="back" type="button" id="back">← Back <kbd>Esc</kbd></button>
       <p class="plate-no">No. ${s.no} · ${esc(s.group)} · ${esc(s.family)}</p>
@@ -458,7 +496,7 @@ async function boot() {
           )
           .join('')}</ul>
           ${statesBlock}
-          <p class="note">${note}</p></dd></div>
+          <p class="note">${note}</p>${fullRange}</dd></div>
         <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF</dd></div>
       </dl>
       <p class="prov">Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, each dot is a 2° cell sized by how many records fall in it), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
@@ -474,6 +512,7 @@ async function boot() {
   plate.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('#back')) return void back();
+    if (t.closest('[data-action="full-range"]')) return void showFullRange();
     const sb = t.closest<HTMLElement>('button[data-state]');
     if (sb?.dataset.state) {
       if (sb.dataset.state === activeState) back();
