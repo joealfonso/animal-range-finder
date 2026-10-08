@@ -36,6 +36,9 @@ export interface Stage {
   stopAutoRotate(): void;
   onCountryClick(cb: (iso: string) => void): void;
   onStateClick(cb: (id: string) => void): void;
+  /** While on, the next click on the globe drops a pin there (onPinDrop) instead of picking a country or state. */
+  setPinMode(on: boolean): void;
+  onPinDrop(cb: (lat: number, lng: number) => void): void;
   onMove(cb: (p: Pov) => void): void;
   /** the user grabbed the globe (drag, scroll, pinch): any scripted camera move has been cancelled */
   onUserControl(cb: () => void): void;
@@ -118,6 +121,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   let markedStates = new Set<string>();
   let clickCb: (iso: string) => void = () => {};
   let stateClickCb: (id: string) => void = () => {};
+  let pinCb: (lat: number, lng: number) => void = () => {};
+  let pinMode = false;
   let moveCb: (p: Pov) => void = () => {};
   let userCb: () => void = () => {};
   let flyingUntil = 0;
@@ -342,7 +347,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       hoverIso = nextIso;
       paint();
     }
-    canvas.style.cursor = hit ? 'pointer' : '';
+    canvas.style.cursor = pinMode ? 'crosshair' : hit ? 'pointer' : '';
     if (hit) {
       const p = hit.state?.properties;
       // built with textContent so place names from the border files can never be read as markup
@@ -390,6 +395,11 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     dragging = false;
     if (!wasClick) return;
     tip.classList.remove('on');
+    if (pinMode) {
+      const ll = screenToLatLng(e.clientX, e.clientY);
+      if (ll) pinCb(ll.lat, ll.lng);
+      return;
+    }
     const hit = pickAtScreen(e.clientX, e.clientY);
     if (hit?.state) stateClickCb(hit.state.properties.id);
     else if (hit?.country) clickCb(hit.country.properties.iso);
@@ -543,6 +553,12 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     },
     onCountryClick: (cb) => (clickCb = cb),
     onStateClick: (cb) => (stateClickCb = cb),
+    setPinMode(on) {
+      pinMode = on;
+      canvas.style.cursor = on ? 'crosshair' : '';
+      if (on) controls.autoRotate = false;
+    },
+    onPinDrop: (cb) => (pinCb = cb),
     onMove: (cb) => (moveCb = cb),
     onUserControl: (cb) => (userCb = cb),
     onFrame: (cb) => frameCbs.push(cb),

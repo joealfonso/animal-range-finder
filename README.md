@@ -26,6 +26,8 @@ For each new species the script:
 4. samples georeferenced GBIF occurrences (leaving out records GBIF flags as captive or managed), bins them into 2° cells for the range layer, takes country counts to list where it lives, and places each sampled record inside a state or province,
 5. writes `public/data/species.json`, `public/data/range/<gbif key>.json` and `public/img/<gbif key>.webp`.
 
+It then runs `scripts/build-near.ts`, which indexes every sampled record by 1° cell into `public/data/near.json`. That index powers **What lives here** (Place → Near me / Drop a pin): the app looks up the cells around the pin, fetches only those animals' point files, and lists every animal with a sampled record within 300 km, nearest first. The location is used only in the browser. It is never put in the URL or sent anywhere.
+
 Finished species are cached in `.cache/`, so a rerun only fetches new rows. Species with no match, too few records or no summary are skipped and listed in `.cache/_failed.txt`.
 
 Then run `npm run check`. It confirms every animal has its range, points and photo files, that links are http(s), that no text contains HTML, and that every country and state it names exists. CI runs the same check and the production build on every pull request.
@@ -47,4 +49,5 @@ NASA Visible Earth (Blue Marble, public domain) · Natural Earth (public domain)
 - Conservation status is the IUCN category as republished by GBIF and may lag the Red List.
 - Continents come from the countries holding at least 1.5% of an animal's records, with Russia split at the Urals. Where the only records on a continent are zoo animals GBIF doesn't flag, `data/continent-fixes.csv` drops that continent by hand.
 - GBIF files some animals we don't mean under a species: dogs and dingoes under the wolf, for example. `EXCLUDE` in `scripts/build-data.ts` leaves those subspecies out. GBIF also doesn't separate the wild Bactrian camel from the domestic one, so the catalogue lists the Bactrian camel as a whole.
+- "What lives here" measures to the nearest *sampled* record, so a real animal may well be closer. When the pin is on a continent the animal isn't listed on, the list marks it "unusual here": often an unflagged zoo or escaped animal (a ring-tailed lemur in France, a black rhino by Denver), but sometimes a real part of its range that few people record.
 - The range sample is capped per species (a few hundred to about 1,200 records) to keep the build fast.

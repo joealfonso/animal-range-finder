@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "data": "tsx scripts/build-data.ts",
+    "data": "tsx scripts/build-data.ts && tsx scripts/build-near.ts",
     "assets": "tsx scripts/fetch-assets.ts && tsx scripts/fetch-states.ts",
     "states": "tsx scripts/fetch-states.ts",
     "check": "tsx scripts/check-data.ts"
