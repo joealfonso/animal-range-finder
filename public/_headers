@@ -1,6 +1,16 @@
 # Response headers Cloudflare adds to static files. Vite copies this into dist/, and Cloudflare reads it there
 # without serving it.
-#
+
+# Security headers for every response. Everything the app loads comes from this site, so the policy allows only
+# 'self'. Inline styles stay allowed: globe.gl injects a <style> tag and the heatmap legend sets colours inline.
+# Images also allow data: (the favicon) and blob: (three.js textures). If Cloudflare Web Analytics or another
+# injected script is turned on later, add its origin here or the browser will block it.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
 # Vite builds JS, CSS and fonts into /assets/ with a content hash in each name, so a changed file always gets a new
 # name and browsers can keep these for a year without checking back. Everything else (index.html, data/, img/,
 # tex/) keeps Cloudflare's default of revalidating on each use, because rerunning the data scripts changes those

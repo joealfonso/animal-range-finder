@@ -345,9 +345,16 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     canvas.style.cursor = hit ? 'pointer' : '';
     if (hit) {
       const p = hit.state?.properties;
-      tip.innerHTML = p
-        ? `<span class="tip">${p.name}<small>${p.kind}, ${p.countryName ?? p.iso}</small></span>`
-        : `<span class="tip">${hit.country!.properties.name}</span>`;
+      // built with textContent so place names from the border files can never be read as markup
+      const label = document.createElement('span');
+      label.className = 'tip';
+      label.textContent = p ? p.name : hit.country!.properties.name;
+      if (p) {
+        const sub = document.createElement('small');
+        sub.textContent = `${p.kind}, ${p.countryName ?? p.iso}`;
+        label.append(sub);
+      }
+      tip.replaceChildren(label);
       tip.classList.add('on');
       // keep it on screen: flip to the left of the cursor near the right edge
       const w = tip.offsetWidth;

@@ -14,6 +14,9 @@ const BASE = import.meta.env.BASE_URL;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const ESC_MAP: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ESC_MAP[c]);
+/** An outbound link, or just its text if the stored URL is not http(s), so bad data can never become a javascript: link. */
+const extLink = (url: string, html: string) =>
+  /^https?:\/\//i.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${html}</a>` : html;
 const nf = new Intl.NumberFormat('en-US');
 const plural = (n: number, one: string, many: string) => `${nf.format(n)} ${n === 1 ? one : many}`;
 /** The name as it would appear mid-sentence: "lion", but "American alligator". Taken from how the description writes it. */
@@ -464,7 +467,7 @@ async function boot() {
            <img src="${BASE}${s.img}" alt="${esc(s.name)}, ${esc(s.sci)}" width="${w}" height="${h}" decoding="async" />
            ${
              c
-               ? `<figcaption>Photo ${esc(c.author)}, <a href="${esc(c.licenseUrl ?? c.page)}" target="_blank" rel="noopener">${esc(c.license)}</a>, <a href="${esc(c.page)}" target="_blank" rel="noopener">Commons</a></figcaption>`
+               ? `<figcaption>Photo ${esc(c.author)}, ${extLink(c.licenseUrl ?? c.page, esc(c.license))}, ${extLink(c.page, 'Commons')}</figcaption>`
                : ''
            }
          </figure>`
@@ -549,7 +552,7 @@ async function boot() {
       <p class="prov">Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
         .map((d) => (d.doi ? `<a href="https://doi.org/${esc(d.doi.replace(/^doi:/, ''))}" target="_blank" rel="noopener">${esc(d.title)}</a>` : esc(d.title)))
         .join('; ')}. Conservation category: IUCN Red List via GBIF. ${
-        s.wiki ? `Text: <a href="${esc(s.wiki)}" target="_blank" rel="noopener">Wikipedia</a>, CC BY-SA 4.0.` : ''
+        s.wiki ? `Text: ${extLink(s.wiki, 'Wikipedia')}, CC BY-SA 4.0.` : ''
       }</p>`;
     plate.hidden = false;
     if (focusedIso) plate.querySelector<HTMLElement>(`button[data-iso="${focusedIso}"]`)?.focus();
