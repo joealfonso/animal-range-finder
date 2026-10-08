@@ -45,6 +45,16 @@ const CONTINENT_SHORT: Record<string, string> = {
   Antarctica: 'Antarctica',
 };
 const STATUS_ORDER = ['CR', 'EN', 'VU', 'NT', 'LC', 'DD', 'NE'];
+/** Where the camera goes when a continent is picked under "Where": roughly centred, with the whole continent in view. */
+const CONTINENT_POV: Record<string, Pov> = {
+  Africa: { lat: 2, lng: 18, altitude: 1.75 },
+  Asia: { lat: 34, lng: 95, altitude: 2 },
+  Europe: { lat: 52, lng: 14, altitude: 1.15 },
+  'North America': { lat: 42, lng: -100, altitude: 1.8 },
+  'South America': { lat: -18, lng: -60, altitude: 1.7 },
+  Oceania: { lat: -24, lng: 145, altitude: 1.6 },
+  Antarctica: { lat: -78, lng: 20, altitude: 1.9 },
+};
 
 async function boot() {
   const [speciesRes, countryRes, stateIndex] = await Promise.all([
@@ -73,6 +83,7 @@ async function boot() {
   // The place you were looking at when you opened the animal from a filtered list. Esc there closes the animal
   // and leaves you where you were, instead of stepping out through country and range.
   let placeEntry: { iso: string; state: string | null } | null = null;
+  let statusKeyOpen = false; // the panel explaining the status codes, opened from the Status row
   // how the range is drawn; remembered per browser, heatmap by default
   let rangeMode: 'heat' | 'points' = 'heat';
   let shownPoints = 0;
@@ -152,15 +163,16 @@ async function boot() {
     blockersDirty = true;
     const continents = [...new Set(species.flatMap((s) => s.continents))].filter((c) => CONTINENT_SHORT[c]);
     const statuses = STATUS_ORDER.filter((c) => species.some((s) => s.status === c));
-    const btn = (kind: string, value: string | null, label: string, on: boolean) =>
-      `<button type="button" data-kind="${kind}" data-value="${value ?? ''}" aria-pressed="${on}">${esc(label)}</button>`;
+    const btn = (kind: string, value: string | null, label: string, on: boolean, title = '') =>
+      `<button type="button" data-kind="${kind}" data-value="${value ?? ''}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
     filtersEl.innerHTML = `
       <div class="frow"><span class="flabel">Where</span>${btn('continent', null, 'All', !filters.continent)}${continents
         .map((c) => btn('continent', c, CONTINENT_SHORT[c], filters.continent === c))
         .join('')}</div>
       <div class="frow"><span class="flabel">Status</span>${btn('status', null, 'All', !filters.status)}${statuses
-        .map((c) => btn('status', c, c, filters.status === c))
-        .join('')}</div>
+        .map((c) => btn('status', c, c, filters.status === c, STATUS_LABEL[c]))
+        .join('')}<button type="button" class="info" data-kind="key" aria-expanded="${statusKeyOpen}" aria-controls="status-key"
+          aria-label="What the status codes mean" title="What the status codes mean">i</button></div>
       <div class="frow place${filters.country ? ' is-set' : ''}"><span class="flabel">Place</span>${
         filters.country
           ? btn('country', null, `${isoName(filters.country)} ✕`, true) +
@@ -170,14 +182,26 @@ async function boot() {
                 ? '<span class="hint">now pick a state on the globe</span>'
                 : '')
           : '<span class="hint">click a country on the globe, then a state</span>'
-      }</div>`;
+      }</div>
+      <div class="status-key" id="status-key" role="note"${statusKeyOpen ? '' : ' hidden'}>
+        <dl>${statuses.map((c) => `<div><dt>${c}</dt><dd>${STATUS_LABEL[c]}</dd></div>`).join('')}</dl>
+        <p>Conservation status from the IUCN Red List, as republished by GBIF. CR, EN and VU are the threatened categories.</p>
+      </div>`;
+  }
+
+  function setStatusKey(open: boolean) {
+    statusKeyOpen = open;
+    renderFilters();
+    filtersEl.querySelector<HTMLElement>('button[data-kind="key"]')?.focus();
   }
 
   filtersEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest('button');
     if (!b) return;
+    if (b.dataset.kind === 'key') return setStatusKey(!statusKeyOpen);
     const kind = b.dataset.kind as keyof Filters;
     const value = b.dataset.value || null;
+    if (kind === 'continent' && value && filters.continent !== value) return pickContinent(value);
     if (kind === 'country') {
       clearCountryFilter();
       return;
@@ -264,10 +288,13 @@ async function boot() {
     return cells;
   }
 
-  async function select(s: Species, placeChanged = false) {
+  /**
+   * opts.placeChanged: the place filter just moved under an open animal, so take the new place, not the animal's.
+   * opts.stay: the caller is already flying the camera somewhere, so don't fly to the animal's range.
+   */
+  async function select(s: Species, opts: { placeChanged?: boolean; stay?: boolean } = {}) {
     // Zoomed into a place? Stay there: from a country/state filter, or while another animal is open at a place.
-    // placeChanged: the place filter just moved under an open animal, so take the new place, not the animal's.
-    const fromFilter = (!selected || placeChanged) && filters.country ? { iso: filters.country, state: filters.state } : null;
+    const fromFilter = (!selected || opts.placeChanged) && filters.country ? { iso: filters.country, state: filters.state } : null;
     const keep = fromFilter ?? (selected && activeCountry ? { iso: activeCountry, state: activeState } : null);
     if (!selected) animalHome = stage.pov();
     if (fromFilter) placeEntry = fromFilter;
@@ -294,7 +321,7 @@ async function boot() {
     shownPoints = pts.length;
     if (rangeMode === 'points') renderPlate(); // the legend counts the points
     animalPov = rangePov(cells);
-    if (!keep) flyTwoStage(animalPov);
+    if (!keep && !opts.stay) flyTwoStage(animalPov);
   }
 
   /** From a country or state, zoom out to everywhere the open animal lives. */
@@ -375,13 +402,42 @@ async function boot() {
     refresh();
     const pov = countryPov(target);
     if (list[0]) {
-      select(list[0], true);
+      select(list[0], { placeChanged: true });
       animalHome = pov; // Esc from here closes the animal and stays at this place
     } else {
       animalHome = null; // nothing lives here: close the animal without flying back to where it was opened
       deselect();
     }
     fly(pov, state ? 1200 : 1300);
+  }
+
+  /**
+   * Picking a continent under "Where": fly to it and open the first animal listed for it, with the camera staying on
+   * the continent. A country or state filter is dropped, since the view is now the whole continent.
+   */
+  function pickContinent(name: string) {
+    filters.continent = name;
+    if (filters.country) {
+      filters.country = null;
+      filters.state = null;
+      filterHome = null;
+      stage.setFilterCountry(null);
+    }
+    refresh();
+    flightToken++;
+    stage.stopAutoRotate();
+    const pov = CONTINENT_POV[name];
+    activeCountry = null; // so the animal opens across its whole range, not zoomed into a country
+    activeState = null;
+    if (list[0]) {
+      select(list[0], { stay: !!pov });
+      if (pov) animalHome = pov; // Esc closes the animal and stays on the continent
+    } else if (selected) {
+      animalHome = null; // nothing listed: close the animal without flying back to where it was opened
+      deselect();
+    } else syncOpenCountry();
+    if (pov) fly(pov, 1500);
+    filtersEl.querySelector<HTMLElement>(`button[data-kind="continent"][data-value="${CSS.escape(name)}"]`)?.focus();
   }
 
   function clearCountryFilter() {
@@ -405,6 +461,10 @@ async function boot() {
   function back(): boolean {
     if (!creditsEl.hidden) {
       closeCredits();
+      return true;
+    }
+    if (statusKeyOpen) {
+      setStatusKey(false);
       return true;
     }
     if (selected && placeEntry && activeCountry === placeEntry.iso && activeState === placeEntry.state) {

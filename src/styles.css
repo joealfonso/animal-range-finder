@@ -358,6 +358,64 @@ kbd {
   margin: 0 -4px;
 }
 
+/* the status-code key: a small "i" at the end of the Status row opens a panel above the filters */
+.filters {
+  position: relative;
+}
+.frow button.info {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--rule-2);
+  border-radius: 50%;
+  font-size: 9.5px;
+  line-height: 13px;
+  text-align: center;
+  text-decoration: none;
+  color: var(--ink-3);
+  align-self: center;
+}
+.frow button.info:hover,
+.frow button.info[aria-expanded='true'] {
+  color: var(--ink);
+  border-color: var(--ink-2);
+}
+.status-key {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: min(340px, 100%);
+  padding: 12px 14px;
+  background: var(--bg); /* solid: on phones it sits over the animal list */
+  border: 1px solid var(--rule);
+  z-index: 5;
+}
+.status-key[hidden] {
+  display: none;
+}
+.status-key dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  margin: 0;
+}
+.status-key dl div {
+  display: contents;
+}
+.status-key dt {
+  color: var(--ink);
+}
+.status-key dd {
+  margin: 0;
+  color: var(--ink-2);
+}
+.status-key p {
+  margin: 10px 0 0;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+
 /* ---------- plate (right) ---------- */
 
 .plate {
