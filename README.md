@@ -30,7 +30,7 @@ It then runs `scripts/build-near.ts`, which indexes every sampled record by 1° 
 
 Finished species are cached in `.cache/`, so a rerun only fetches new rows. Species with no match, too few records or no summary are skipped and listed in `.cache/_failed.txt`.
 
-Then `scripts/build-sounds.ts` adds each animal's call. Recordings are picked by hand in `data/sounds.csv` (scientific name, Wikimedia Commons file, and a label that finishes "Hear its ..."), because searching Commons by animal name mostly finds music, pronunciations and spoken articles. The script keeps a file only under the same licences as the photos, cuts out the loudest 12 seconds (measured above 250 Hz so wind noise doesn't win), levels the volume and writes `public/sound/<gbif key>.mp3`. It needs [ffmpeg](https://ffmpeg.org/) on the PATH. `npm run sounds` reruns just this step. Animals without a row simply have no play button; many (fish, snakes, octopuses) make no sound people would know them by.
+Then `scripts/build-sounds.ts` adds each animal's call. Recordings are picked by hand in `data/sounds.csv` (scientific name, source, and a label that finishes "Hear its ..."), because searching Commons by animal name mostly finds music, pronunciations and spoken articles. The source is a Wikimedia Commons file name or an iNaturalist observation URL, whose first CC0 / CC BY / CC BY-SA recording is used. The script keeps a file only under the same licences as the photos, cuts out the loudest 12 seconds (measured above 250 Hz so wind noise doesn't win), levels the volume and writes `public/sound/<gbif key>.mp3`. It needs [ffmpeg](https://ffmpeg.org/) on the PATH. `npm run sounds` reruns just this step. Animals without a row simply have no play button; many (fish, snakes, octopuses) make no sound people would know them by.
 
 Then run `npm run check`. It confirms every animal has its range, points and photo files, that links are http(s), that no text contains HTML, and that every country and state it names exists. CI runs the same check and the production build on every pull request.
 
@@ -42,7 +42,7 @@ None are needed. GBIF, Wikipedia and Wikimedia Commons are keyless. If a keyed s
 
 ## Sources
 
-NASA Visible Earth (Blue Marble, public domain) · Natural Earth (public domain) · GBIF occurrences (CC0 / CC BY per dataset) · Wikipedia text (CC BY-SA 4.0) · Wikimedia Commons photos and sounds (per-file licence, credited in the UI) · Instrument Serif and IBM Plex Mono (SIL OFL 1.1). The same list is in the app under "Sources & credits".
+NASA Visible Earth (Blue Marble, public domain) · Natural Earth (public domain) · GBIF occurrences (CC0 / CC BY per dataset) · Wikipedia text (CC BY-SA 4.0) · Wikimedia Commons photos and sounds, iNaturalist sounds (per-file licence, credited in the UI) · Instrument Serif and IBM Plex Mono (SIL OFL 1.1). The same list is in the app under "Sources & credits".
 
 ## Honest limits
 

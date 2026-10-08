@@ -75,6 +75,12 @@ const KINDS: Record<string, string[]> = {
   Spheniscidae: ['flightless bird'],
   Trochilidae: ['hummingbird'],
   Corvidae: ['crow'],
+  Columbidae: ['pigeon', 'dove'],
+  Laridae: ['gull', 'seagull'],
+  Picidae: ['woodpecker'],
+  Psittaculidae: ['parrot'],
+  Cacatuidae: ['parrot', 'cockatoo'],
+  Alcedinidae: ['kingfisher'],
   // reptiles, amphibians
   Pythonidae: ['snake'],
   Boidae: ['snake'],

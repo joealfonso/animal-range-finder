@@ -1,6 +1,7 @@
-scientific,commons file,label
-# One recording per animal, picked by hand from Wikimedia Commons. The label finishes "Hear its ...".
-# Only add a file that is a recording of this animal (not a spoken article or a pronunciation).
+scientific,source,label
+# One recording per animal, picked by hand: a Wikimedia Commons file name, or an iNaturalist observation URL (its first
+# CC0 / CC BY / CC BY-SA recording is used). The label finishes "Hear its ...".
+# Only add a recording of this animal (not a spoken article or a pronunciation).
 Panthera leo,Lion raring-sound1TamilNadu178.ogg,roar
 Panthera tigris,439280 schots angry-tiger.wav,growl
 Panthera onca,Jaguar saw.flac,sawing call
@@ -49,7 +50,7 @@ Apteryx mantelli,Kiwi Male North Island brown kiwi song.ogg,call
 Phoenicopterus roseus,Phoenicopterus roseus - Greater Flamingo XC432217.mp3,honk
 Pelecanus onocrotalus,Great White Pelican (Pelecanus onocrotalus) sounds.ogg,calls
 Ardea cinerea,Grey Heron (Ardea cinerea) (W ARDEA CINEREA R1 C19).ogg,croaks and bill-snaps
-Grus japonensis,Red Crowned Crane (Antti Luode).mp3,calls
+Grus japonensis,https://www.inaturalist.org/observations/258010379,calls
 Cygnus olor,Cygnus olor - Mute Swan XC434964.mp3,wingbeats (it rarely calls)
 Anser anser,Anser anser - Greylag Goose XC436358.mp3,honk
 Fratercula arctica,Atlantic Puffin (Fratercula arctica) (W1CDR0001416 BD3).ogg,growl
@@ -61,3 +62,72 @@ Corvus corax,Common Raven (Corvus corax) (W1CDR0001449 BD6).ogg,croak
 Alligator mississippiensis,27alligator2bellow.ogg,bellow
 Dermochelys coriacea,Dermochelys coriacea 001.ogg,breathing
 Apis mellifera,BioAcoustica 413-2 Apis mellifera 524 .flac,buzz
+Alouatta seniculus,https://www.inaturalist.org/observations/142421392,howl
+Antilocapra americana,https://www.inaturalist.org/observations/168934811,snort
+Aptenodytes forsteri,https://www.inaturalist.org/observations/200575498,call
+Ateles geoffroyi,https://www.inaturalist.org/observations/144493970,whinny
+Cacatua galerita,https://www.inaturalist.org/observations/204697440,screech
+Capra ibex,https://www.inaturalist.org/observations/229027580,call
+Castor canadensis,https://www.inaturalist.org/observations/72399972,tail slap
+Casuarius casuarius,https://www.inaturalist.org/observations/372534020,calls
+Chrysocyon brachyurus,https://www.inaturalist.org/observations/336455859,bark
+Connochaetes taurinus,https://www.inaturalist.org/observations/391056098,grunts
+Crotalus atrox,https://www.inaturalist.org/observations/33848251,rattle
+Didelphis virginiana,https://www.inaturalist.org/observations/112927147,call
+Enhydra lutris,https://www.inaturalist.org/observations/127433569,sounds
+Equus quagga,https://www.inaturalist.org/observations/293825875,bark
+Falco peregrinus,https://www.inaturalist.org/observations/148570421,call
+Hippopotamus amphibius,https://www.inaturalist.org/observations/47189274,grunts
+Hydrochoerus hydrochaeris,https://www.inaturalist.org/observations/90187694,calls
+Lontra canadensis,https://www.inaturalist.org/observations/83957952,call
+Loxodonta africana,https://www.inaturalist.org/observations/48825579,rumbles
+Lynx lynx,https://www.inaturalist.org/observations/69259154,call
+Mirounga leonina,https://www.inaturalist.org/observations/125968022,roar
+Mustela erminea,https://www.inaturalist.org/observations/396345133,call
+Myrmecophaga tridactyla,https://www.inaturalist.org/observations/260551679,call
+Nasalis larvatus,https://www.inaturalist.org/observations/34146241,honk
+Nasua nasua,https://www.inaturalist.org/observations/142783815,baby's call
+Ochotona princeps,https://www.inaturalist.org/observations/339851,squeak
+Odocoileus virginianus,https://www.inaturalist.org/observations/187746289,snort
+Panthera pardus,https://www.inaturalist.org/observations/387570836,sawing call
+Papio anubis,https://www.inaturalist.org/observations/337826872,bark
+Phascolarctos cinereus,https://www.inaturalist.org/observations/189334655,bellow
+Pteronura brasiliensis,https://www.inaturalist.org/observations/384701700,calls
+Puma concolor,https://www.inaturalist.org/observations/355877320,scream
+Spheniscus demersus,https://www.inaturalist.org/observations/378392423,bray
+Trichoglossus moluccanus,https://www.inaturalist.org/observations/336552795,screech
+Tursiops truncatus,https://www.inaturalist.org/observations/193598870,whistles
+Ursus americanus,https://www.inaturalist.org/observations/165140438,huff
+Vulpes lagopus,https://www.inaturalist.org/observations/221768712,call
+Zalophus californianus,https://www.inaturalist.org/observations/145868221,barks
+Cyanocitta cristata,Cyanocitta cristata - Blue Jay XC86755.mp3,jay call
+Corvus brachyrhynchos,Corvus brachyrhynchos call.ogg,caw
+Corvus corone,XC24828 - Zwarte Kraai - Corvus corone.ogg,caw
+Cardinalis cardinalis,Cardinalis cardinalis - Northern Cardinal XC125284.ogg,song
+Turdus migratorius,Turdus migratorius - American Robin XC128490.ogg,song
+Zenaida macroura,Zenaida macroura - Mourning Dove XC128006.ogg,coo
+Poecile atricapillus,Poecile atricapillus - Black-capped Chickadee - XC114086.ogg,chick-a-dee call
+Anas platyrhynchos,Mallard (Anas platyrhynchos) (W1CDR0001518 BD17).ogg,quack
+Columba livia,Columba livia - Rock Dove XC539061.mp3,coo
+Branta canadensis,Branta canadensis.ogg,honk
+Dryobates pubescens,Dryobates pubescens - Downy Woodpecker XC134879.mp3,drumming
+Archilochus colubris,Archilochus colubris.ogg,chirps
+Agelaius phoeniceus,Red-winged Blackbird (Agelaius phoeniceus).ogg,song
+Sturnus vulgaris,Common Starling (Sturnus vulgaris) (W1CDR0001431 BD8).ogg,chatter
+Passer domesticus,Passer domesticus.ogg,chirps
+Hirundo rustica,Hirundo rustica - Barn Swallow XC83449.mp3,song
+Mimus polyglottos,Mimus polyglottos.ogg,songs
+Spinus tristis,Spinus tristis - American Goldfinch XC59665.ogg,song
+Buteo jamaicensis,Buteo jamaicensis - Red-tailed Hawk XC71575.mp3,scream
+Bubo virginianus,Bubo virginianus - Great Horned Owl XC156403.mp3,hoots
+Gavia immer,Gavia immer - Common Loon XC139388.mp3,tremolo call
+Meleagris gallopavo,Meleagris gallopavo - Wild Turkey XC134155.ogg,gobble
+Larus argentatus,XC707075 - European Herring Gull - Larus argentatus.mp3,call
+Erithacus rubecula,European Robin (Erithacus rubecula) (W1CDR0001425 BD16).ogg,song
+Turdus merula,Common Blackbird (Turdus merula) (W1CDR0001425 BD22).ogg,song
+Cyanistes caeruleus,Cyanistes caeruleus.ogg,song
+Pica pica,https://www.inaturalist.org/observations/306074015,chatter
+Cuculus canorus,Common Cuckoo (Cuculus canorus) (W1CDR0001463 BD1).ogg,cuckoo call
+Dacelo novaeguineae,Dacelo novaeguineae ANWC X00522.opus,laugh
+Acridotheres tristis,Common myna-Acridotheres tristis.wav,calls
+Psittacula krameri,Psittacula krameri - Rose-ringed Parakeet XC474519.mp3,squawk
