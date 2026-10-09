@@ -396,8 +396,17 @@ for (const s of out) {
     if ((ru.length - west) / s.points.length >= 0.015) set.add('Asia');
     if (!ru.length) set.add('Europe'); // no sampled points to place it: keep what the country file says
   }
-  for (const c of continentFixes.get(s.sci) ?? []) set.delete(c);
+  const dropped = continentFixes.get(s.sci) ?? [];
+  for (const c of dropped) set.delete(c);
   s.continents = [...set];
+  if (dropped.length) {
+    // a continent dropped by hand takes its countries and states with it, so a zoo in Germany doesn't list Germany as
+    // the giant panda's range (Russia stays while either of its sides does)
+    const keep = (iso: string) => (iso === 'RU' ? set.has('Europe') || set.has('Asia') : set.has(continentOf.get(iso)!));
+    s.countries = s.countries.filter((c: any) => keep(c.iso));
+    s.iso = s.iso.filter(keep);
+    s.states = s.states.filter((x: any) => keep(x.iso));
+  }
 }
 
 // Individual wild records for the "Points" view. Locations are rounded: ~1 km normally, ~11 km for critically

@@ -5,7 +5,7 @@ import '@fontsource/ibm-plex-mono/500.css';
 import './styles.css';
 
 import { createStage } from './stage';
-import { createSearch, type Filters } from './search';
+import { createSearch, type Filters, type Why } from './search';
 import { HEAT_BANDS } from './heat';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
@@ -77,11 +77,12 @@ async function boot() {
   const byId = new Map(species.map((s) => [s.id, s]));
 
   const stage = createStage($('globe'), countries, { small, reduced });
-  const run = createSearch(species, isoName);
+  const { run, search } = createSearch(species, isoName);
 
   // ---------- state ----------
   const filters: Filters = { continent: null, status: null, country: null, state: null };
   let list: Species[] = species;
+  let why = new Map<number, Why>(); // why each result matched, when its name doesn't say
   let activeIdx = 0;
   let selected: Species | null = null;
   let activeCountry: string | null = null;
@@ -151,8 +152,8 @@ async function boot() {
             class="${i === activeIdx ? 'is-active' : ''}${selected?.id === s.id ? ' is-open' : ''}">
           <span class="no">${s.no}</span>
           <span class="nm">${esc(s.name)}</span>
-          <span class="st" title="${STATUS_LABEL[s.status] ?? ''}">${s.status}</span>
-          <span class="la">${esc(s.sci)}${nearKm(s)}</span>
+          <span class="st" data-s="${s.status}" title="${STATUS_LABEL[s.status] ?? ''}">${s.status}</span>
+          <span class="la">${esc(s.sci)}${whyTag(s)}${nearKm(s)}</span>
         </li>`,
       )
       .join('');
@@ -160,6 +161,20 @@ async function boot() {
     if (!list.length) empty.textContent = emptyMessage();
     tally.textContent = `${list.length}/${species.length}`;
     q.setAttribute('aria-activedescendant', list[activeIdx] ? `opt-${list[activeIdx].id}` : '');
+  }
+
+  /** The country this result is about, if it is introduced there: the one searched for or picked under "Place". */
+  function introducedIn(s: Species): string | null {
+    const iso = filters.country ?? why.get(s.id)?.iso;
+    return iso && s.countries.some((c) => c.iso === iso && c.introduced) ? iso : null;
+  }
+
+  /** Under a result: why it matched when its name doesn't say, and whether it is only introduced in the place asked about. */
+  function whyTag(s: Species) {
+    const iso = introducedIn(s);
+    if (iso) return `<span class="why is-introduced"> · introduced in ${esc(isoName(iso))}</span>`;
+    const w = why.get(s.id);
+    return w ? `<span class="why"> · ${esc(w.text)}</span>` : '';
   }
 
   function nearKm(s: Species) {
@@ -203,7 +218,9 @@ async function boot() {
   }
 
   function refresh() {
-    list = run(q.value, filters);
+    ({ list, why } = search(q.value, filters));
+    // animals native to a place come before the ones people only brought there
+    list = [...list.filter((s) => !introducedIn(s)), ...list.filter((s) => introducedIn(s))];
     if (near) {
       const hits = near.hits;
       list = hits ? list.filter((s) => hits.has(s.id)).sort((a, b) => hits.get(a.id)!.km - hits.get(b.id)!.km) : [];
@@ -225,9 +242,13 @@ async function boot() {
         .map((c) => btn('continent', c, CONTINENT_SHORT[c], filters.continent === c))
         .join('')}</div>
       <div class="frow"><span class="flabel">Status</span>${btn('status', null, 'All', !filters.status)}${statuses
-        .map((c) => btn('status', c, c, filters.status === c, STATUS_LABEL[c]))
+        .map((c) => btn('status', c, c, filters.status === c, `${STATUS_LABEL[c]}. ${STATUS_NOTE[c] ?? ''}`))
         .join('')}<button type="button" class="info" data-kind="key" aria-expanded="${statusKeyOpen}" aria-controls="status-key"
-          aria-label="What the status codes mean" title="What the status codes mean">i</button></div>
+          title="What the status codes mean">What do these mean?</button>${
+          filters.status
+            ? `<span class="hint status-hint"><b>${esc(STATUS_LABEL[filters.status])}.</b> ${esc(STATUS_NOTE[filters.status] ?? '')}</span>`
+            : ''
+        }</div>
       <div class="frow place${filters.country || near || pinArmed ? ' is-set' : ''}"><span class="flabel">Place</span>${
         near
           ? btn('near', null, `${near.you ? 'Near you' : near.label ? `Pin in ${near.label}` : 'Pin at sea'} ✕`, true) +
@@ -703,6 +724,11 @@ async function boot() {
           <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>
         </span>
       </div>
+      <p class="map-caveat">${
+        rangeMode === 'heat'
+          ? 'The shading shows where people have recorded this animal, not an expert range map.'
+          : 'Each dot is a record people logged on GBIF, not an expert range map.'
+      }</p>
       <p class="plate-no">No. ${s.no} · ${esc(s.group)} · ${esc(s.family)}</p>
       <div class="plate-head${s.img && wide ? ' is-wide' : ''}">
         ${photo}
@@ -710,7 +736,9 @@ async function boot() {
           <h2>${esc(s.name)}</h2>
           <p class="sci">${esc(s.sci)}</p>
           <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span>${
-            STATUS_NOTE[s.status] ? `<span class="status-note">${STATUS_NOTE[s.status]}</span>` : ''
+            STATUS_NOTE[s.status]
+              ? `<span class="status-note">${STATUS_NOTE[s.status]}${s.countries.some((x) => x.introduced) ? ' The rating is for its native range.' : ''}</span>`
+              : ''
           }</p>
           ${hear(s)}
         </div>
@@ -718,12 +746,19 @@ async function boot() {
       <p class="desc">${esc(s.desc)}</p>
       <dl class="facts">
         ${nearFact(s)}
-        <div><dt>Range</dt><dd><ul class="range-list">${s.countries
+        <div><dt>Range</dt><dd><ul class="range-list">${[...s.countries.filter((x) => !x.introduced), ...s.countries.filter((x) => x.introduced)]
           .map(
             (x) =>
-              `<li><button type="button" data-iso="${x.iso}" aria-pressed="${x.iso === activeCountry}">${esc(isoName(x.iso))}</button></li>`,
+              `<li${x.introduced ? ' class="is-introduced"' : ''}><button type="button" data-iso="${x.iso}" aria-pressed="${x.iso === activeCountry}">${esc(isoName(x.iso))}</button>${x.introduced ? '<span class="tag">introduced</span>' : ''}</li>`,
           )
           .join('')}</ul>
+          ${
+            s.countries.every((x) => x.introduced)
+              ? '<p class="note">Every country here is marked “introduced”: most records of this animal come from places people brought it to, so this is not its native range.</p>'
+              : s.countries.some((x) => x.introduced)
+                ? '<p class="note">Marked “introduced”: people brought it there, so those countries are not part of its native range.</p>'
+                : ''
+          }
           ${statesBlock}
           <p class="note">${note}</p>${fullRange}</dd></div>
         <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF</dd></div>

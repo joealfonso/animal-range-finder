@@ -87,6 +87,9 @@ for (const s of species) {
 
   // places it names have to exist, or the globe and the range list can't show them
   for (const iso of s.iso) if (!countryIsos.has(iso)) fail(at, `country ${iso} is not in countries.json`);
+  // the range list is built from countries and the filters from iso: they have to agree
+  if (s.countries.map((c) => c.iso).join() !== s.iso.join()) fail(at, 'countries and iso list different places');
+  for (const c of s.countries) if (c.introduced !== undefined && c.introduced !== true) fail(at, `${c.iso}: introduced is not true`);;
   for (const st of s.states ?? []) {
     const ids = stateIds.get(st.iso);
     if (!ids) fail(at, `state ${st.name} is in ${st.iso}, which has no states file`);

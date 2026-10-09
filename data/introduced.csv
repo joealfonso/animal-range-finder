@@ -1,0 +1,38 @@
+scientific,countries
+# Countries in an animal's range where it is introduced: every wild population there came from people (released,
+# escaped or spread by them), so the country is not part of its native range. Applied by npm run data.
+# Only countries where NO part of the population is native. Where the animal is native in part of a country and
+# introduced in another (the cane toad in the US, the bullfrog in Canada, the red fox in the US) the country is left
+# unmarked. GBIF's own checklist data is too noisy to use (it calls the emu introduced in Australia), so this is
+# checked by hand against each animal's Wikipedia article. ISO 3166-1 alpha-2 codes, separated by semicolons.
+Aldabrachelys gigantea,MU;TZ;SH
+Lithobates catesbeianus,BE;KR;FR
+Python bivittatus,US
+Callipepla californica,CA;CL;NZ
+Branta canadensis,SE;GB;BE;NL
+Rhinella marina,AU;PH;PR
+Turdus merula,AU;NZ
+Acridotheres tristis,AU;ZA;US;NZ;IL
+Phasianus colchicus,US;GB;NL;SE;BE;FR;DK;CA;DE;FI
+Sturnus vulgaris,US;CA;AU
+Sciurus carolinensis,GB
+Streptopelia decaocto,US;CA;MX
+Araneus diadematus,US;CA
+Mantis religiosa,US;CA
+Oryctolagus cuniculus,GB;NL;BE;AU;CL;DE
+Cornu aspersum,US;AU;MX
+Passer domesticus,US;CA;AU
+Cygnus olor,US;CA
+Castor canadensis,CL
+Procyon lotor,BE;DE;LU;FR;JP
+Vulpes vulpes,AU
+Rangifer tarandus,IS
+Columba livia,US;CA;AU
+Psittacula krameri,GB;BE;NL;IL;FR;ES;DE
+Coccinella septempunctata,US;CA
+Odocoileus virginianus,FI
+Sus scrofa,AU;US
+Apis mellifera,US;CA;AU;MX
+Genetta genetta,FR;ES;PT
+Pavo cristatus,US
+Iguana iguana,US;PR
