@@ -3,13 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Animal Range Finder</title>
+    <title>Animal Range Finder: see where any animal lives on a 3D globe</title>
+    <link rel="canonical" href="https://animalrangefinder.com/" />
     <meta name="description" content="A catalogue of animals set against a globe. Search by name or place and see where each species lives, drawn from GBIF occurrence records." />
     <meta name="theme-color" content="#06070a" />
     <!-- link previews in chats and social posts; og.jpg is a 1200×630 capture of the start view -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Animal Range Finder" />
-    <meta property="og:title" content="Animal Range Finder" />
+    <meta property="og:title" content="Animal Range Finder: see where any animal lives on a 3D globe" />
     <meta property="og:description" content="A catalogue of animals set against a globe. Search by name or place and see where each species lives, drawn from GBIF occurrence records." />
     <meta property="og:url" content="https://animalrangefinder.com/" />
     <meta property="og:image" content="https://animalrangefinder.com/og.jpg" />
@@ -17,9 +18,11 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="A 3D globe of Earth beside a list of animals and a search field." />
     <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"Animal Range Finder","url":"https://animalrangefinder.com/","description":"Search an animal and see where it lives on an interactive 3D globe, drawn from GBIF occurrence records."}</script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3' fill='%23ff5a36'/%3E%3C/svg%3E" />
   </head>
   <body>
+    <noscript><p class="fatal">Animal Range Finder needs JavaScript for the globe. You can still <a href="/animal/">browse every animal</a>.</p></noscript>
     <div id="globe" role="img" aria-label="Interactive globe. Use the search field to choose an animal; its range is drawn on the globe."></div>
 
     <svg id="leader" aria-hidden="true">
@@ -66,6 +69,7 @@
     <aside class="credits" id="credits" hidden aria-label="Sources and credits">
       <button class="credits-close" id="credits-close">Close <span aria-hidden="true">Esc</span></button>
       <h2>Sources &amp; credits</h2>
+      <p class="lede"><a href="/animal/">Browse every animal as a list</a></p>
       <p class="lede">Everything on this page comes from openly licensed or public-domain material. Nothing is generated.</p>
       <dl>
         <dt>Globe imagery</dt>
