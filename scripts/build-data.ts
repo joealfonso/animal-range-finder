@@ -51,10 +51,18 @@ const EXCLUDE: Record<string, number[]> = {
 
 // IUCN categories GBIF has wrong or missing, set by hand and keyed by the scientific name shown in the app.
 // GBIF holds the eastern gorilla's species-wide category (CR) but none for the mountain gorilla subspecies (EN since 2018),
-// and lists the eland as not evaluated because its IUCN entry sits under the old genus name (LC).
+// and lists the eland, giant otter, Malayan tapir, wild yak and Aldabra giant tortoise as not evaluated because their IUCN
+// entries sit under an old genus name or an old assessment it doesn't match (LC, EN, EN, VU, VU).
+// 'VAR' is not an IUCN category: GBIF's Galápagos tortoise is the extinct Floreana tortoise, but the photos, records and text
+// are the living Galápagos tortoises, which IUCN now rates one species at a time (critically endangered to vulnerable).
 const STATUS_OVERRIDE: Record<string, string> = {
   'Gorilla beringei': 'EN',
   'Tragelaphus oryx': 'LC',
+  'Pteronura brasiliensis': 'EN',
+  'Tapirus indicus': 'EN',
+  'Bos mutus': 'VU',
+  'Aldabrachelys gigantea': 'VU',
+  'Chelonoidis niger': 'VAR',
 };
 
 // Hand corrections for continents whose only records there are zoo or captive animals GBIF does not flag.
@@ -393,8 +401,9 @@ for (const s of out) {
 }
 
 // Individual wild records for the "Points" view. Locations are rounded: ~1 km normally, ~11 km for critically
-// endangered and endangered animals, so the map never pinpoints where a threatened animal can be found.
-const SENSITIVE = new Set(['CR', 'EN', 'EW']);
+// endangered and endangered animals, so the map never pinpoints where a threatened animal can be found. 'VAR' (the
+// Galápagos tortoises) counts: most of its species are critically endangered or endangered.
+const SENSITIVE = new Set(['CR', 'EN', 'EW', 'VAR']);
 for (const s of out) {
   const step = SENSITIVE.has(s.status) ? 10 : 100; // 0.1° or 0.01°
   const seen = new Set<string>();

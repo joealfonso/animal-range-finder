@@ -95,6 +95,7 @@ export const STATUS_LABEL: Record<string, string> = {
   LC: 'Least concern',
   DD: 'Data deficient',
   NE: 'Not evaluated',
+  VAR: 'Varies by species',
 };
 
 /** What each status means, in plain words, shown under it on the animal's page. */
@@ -108,4 +109,5 @@ export const STATUS_NOTE: Record<string, string> = {
   LC: 'Not at risk: it is doing well in the wild.',
   DD: 'Scientists don’t have enough information yet to say how at risk it is.',
   NE: 'Scientists haven’t checked yet how at risk it is, so this doesn’t mean it is safe or in danger.',
+  VAR: 'It is a group of related animals, and each kind is rated on its own, from vulnerable to critically endangered.',
 };
