@@ -252,7 +252,7 @@ async function boot() {
       <div class="frow place${filters.country || near || pinArmed ? ' is-set' : ''}"><span class="flabel">Place</span>${
         near
           ? btn('near', null, `${near.you ? 'Near you' : near.label ? `Pin in ${near.label}` : 'Pin at sea'} ✕`, true) +
-            `<span class="hint">${near.hits ? `${plural(near.hits.size, 'animal', 'animals')} recorded within ${NEAR_KM} km` : 'measuring…'}</span>`
+            `<span class="hint">${near.hits ? `<b>${list.length}</b> of ${species.length} animals recorded within ${NEAR_KM} km` : 'measuring…'}</span>`
           : pinArmed
             ? `<span class="hint">click anywhere on the globe</span>${btn('pin-cancel', null, 'Cancel', false)}`
             : filters.country
@@ -261,7 +261,8 @@ async function boot() {
               ? `<span class="crumb" aria-hidden="true">›</span>${btn('state', null, `${stateName(filters.state)} ✕`, true)}`
               : stateIndex[filters.country]
                 ? '<span class="hint">now pick a state on the globe</span>'
-                : '')
+                : '') +
+            `<span class="hint place-count"><b>${list.length}</b> of ${species.length} animals ${filters.state ? 'in this state' : 'live here'}</span>`
           : `${btn('locate', null, 'Near me', false, 'Animals recorded near you. Your location stays in this page.')}${btn('pin', null, 'Drop a pin', false, 'Animals recorded near any spot you click')}${nearNote ? `<span class="hint is-note">${esc(nearNote)}</span>` : '<span class="hint">or click a country, then a state</span>'}`
       }</div>
       <div class="status-key" id="status-key" role="note"${statusKeyOpen ? '' : ' hidden'}>
@@ -736,7 +737,7 @@ async function boot() {
           <p class="sci">${esc(s.sci)}</p>
           <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span>${
             STATUS_NOTE[s.status]
-              ? `<span class="status-note">${STATUS_NOTE[s.status]}${s.countries.some((x) => x.introduced) ? ' The rating is for its native range.' : ''}</span>`
+              ? `<details class="more status-more"><summary>What this means</summary><span class="status-note">${STATUS_NOTE[s.status]}${s.countries.some((x) => x.introduced) ? ' The rating is for its native range.' : ''}</span></details>`
               : ''
           }</p>
           ${hear(s)}
@@ -768,21 +769,21 @@ async function boot() {
                   .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
                   .join('')}</span>
                  <span class="legend-ends" aria-hidden="true"><span>fewer records</span><span>more</span></span>
-                 <p class="note">Where wild records are densest. Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the individual records, with the shading relative to what is in view. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p>`
+                 <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest. Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the individual records, with the shading relative to what is in view. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
               : `<p class="legend-point"><i aria-hidden="true"></i>One wild record${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
-                 <p class="note">Each point is a record from the GBIF sample, rounded to ${
+                 <details class="more"><summary>About these points</summary><p class="note">Each point is a record from the GBIF sample, rounded to ${
                    s.pointsRounding === 0.1
                      ? 'about 11 km, because this animal is threatened and exact locations can help poachers'
                      : 'about 1 km'
-                 }. Repeat sightings at the same spot show as one point.</p>`
+                 }. Repeat sightings at the same spot show as one point.</p></details>`
           }
         </dd></div>
       </dl>
-      <p class="prov">Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
+      <details class="more prov"><summary>Data sources and caveats</summary><p>Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
         .map((d) => (d.doi ? `<a href="https://doi.org/${esc(d.doi.replace(/^doi:/, ''))}" target="_blank" rel="noopener">${esc(d.title)}</a>` : esc(d.title)))
         .join('; ')}. Conservation category: IUCN Red List via GBIF. ${
         s.wiki ? `Text: ${extLink(s.wiki, 'Wikipedia')}, CC BY-SA 4.0.` : ''
-      }</p>`;
+      }</p></details>`;
     plate.hidden = false;
     if (focusedIso) plate.querySelector<HTMLElement>(`button[data-iso="${focusedIso}"]`)?.focus();
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();

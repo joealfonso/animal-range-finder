@@ -36,51 +36,65 @@ interface Box {
 }
 const WORLD: Box = { lat0: -90, lat1: 90, lng0: -180, lng1: 180 };
 
-/** A canvas texture on a patch of sphere covering `box`, plus the buffers to draw density bands into it. */
+/**
+ * A vector layer on a patch of sphere covering a lat/lng box: density is sampled on a node grid, then each band is
+ * extracted as filled polygons (marching squares) with a contour line along its edge. Geometry, not pixels, so the
+ * edges stay sharp at any zoom.
+ */
 function heatLayer(W: number, H: number, radius: number, order: number) {
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(W, H);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  const group = new THREE.Group();
+  group.rotation.y = -Math.PI / 2; // three-globe faces the prime meridian along Z; match it so the map lines up
+  group.visible = false;
 
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
-  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
-  mesh.rotation.y = -Math.PI / 2; // three-globe faces the prime meridian along Z; match it so the map lines up
-  mesh.renderOrder = order; // under the border lines
-  mesh.visible = false;
+  // the fill of each band is drawn as the whole region at or above its threshold; alphas are set so the stack
+  // adds up to the band's own alpha
+  const fillMats = HEAT_BANDS.slice(1).map((c, k) => {
+    const prev = k === 0 ? 0 : HEAT_BANDS[k][3];
+    const a = (c[3] - prev) / (1 - prev);
+    return new THREE.MeshBasicMaterial({
+      color: new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255).convertSRGBToLinear(),
+      transparent: true,
+      opacity: a,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+  });
+  const lineMat = new THREE.LineBasicMaterial({
+    color: new THREE.Color(CONTOUR[0] / 255, CONTOUR[1] / 255, CONTOUR[2] / 255).convertSRGBToLinear(),
+    transparent: true,
+    opacity: CONTOUR_ALPHA,
+    depthWrite: false,
+  });
+  const fills = fillMats.map((m, k) => {
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), m);
+    mesh.renderOrder = order + k * 0.001;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    return mesh;
+  });
+  const lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMat);
+  lines.renderOrder = order + 0.01;
+  lines.frustumCulled = false;
+  group.add(lines);
 
-  const density = new Float32Array(W * H);
-  const norm = new Float32Array(W * H);
+  const NX = W + 1;
+  const NY = H + 1;
+  const density = new Float32Array(NX * NY);
   const rad = Math.PI / 180;
-  let box: Box | null = null;
 
-  /** Equirectangular patch, north at the top of the canvas: phi runs with longitude from -180°, theta from the pole. */
-  function setBox(b: Box) {
-    box = b;
-    mesh.geometry.dispose();
-    const lngSpan = b.lng1 - b.lng0;
-    const latSpan = b.lat1 - b.lat0;
-    mesh.geometry = new THREE.SphereGeometry(
-      radius,
-      Math.max(8, Math.ceil(lngSpan / 3.75)),
-      Math.max(6, Math.ceil(latSpan / 2.8)),
-      (b.lng0 + 180) * rad,
-      lngSpan * rad,
-      (90 - b.lat1) * rad,
-      latSpan * rad,
-    );
+  /** Same mapping as THREE.SphereGeometry (phi from lng -180°, theta from the pole), so the group rotation matches. */
+  function place(lat: number, lng: number, out: number[]) {
+    const phi = (lng + 180) * rad;
+    const theta = (90 - lat) * rad;
+    const s = Math.sin(theta);
+    out.push(-radius * Math.cos(phi) * s, radius * Math.cos(theta), radius * Math.sin(phi) * s);
   }
 
   /**
    * Kernel density of weighted points over the box, in degrees (longitude distances shrink with latitude), then
-   * normalised and drawn as bands. Returns false when nothing lands in the box.
+   * normalised and turned into bands. Returns false when nothing lands in the box.
    */
   function draw(b: Box, pts: ArrayLike<number>[], sigma: number, weightOf: (p: ArrayLike<number>) => number) {
-    if (!box || box.lat0 !== b.lat0 || box.lat1 !== b.lat1 || box.lng0 !== b.lng0 || box.lng1 !== b.lng1) setBox(b);
     density.fill(0);
     const world = b.lng1 - b.lng0 >= 360;
     const pxLat = H / (b.lat1 - b.lat0);
@@ -96,9 +110,9 @@ function heatLayer(W: number, H: number, radius: number, order: number) {
       if (lat + reach < b.lat0 || lat - reach > b.lat1) continue;
       const weight = weightOf(p);
       const y0 = Math.max(0, Math.floor((b.lat1 - (lat + reach)) * pxLat));
-      const y1 = Math.min(H - 1, Math.ceil((b.lat1 - (lat - reach)) * pxLat));
+      const y1 = Math.min(H, Math.ceil((b.lat1 - (lat - reach)) * pxLat));
       for (let y = y0; y <= y1; y++) {
-        const plat = b.lat1 - (y + 0.5) / pxLat;
+        const plat = b.lat1 - y / pxLat;
         const dLat = plat - lat;
         const cos = Math.max(0.05, Math.cos(plat * rad));
         const lngReach = Math.min(180, reach / cos);
@@ -106,81 +120,100 @@ function heatLayer(W: number, H: number, radius: number, order: number) {
         let x1 = Math.ceil((lng + lngReach - b.lng0) * pxLng);
         if (!world) {
           x0 = Math.max(0, x0);
-          x1 = Math.min(W - 1, x1);
+          x1 = Math.min(W, x1);
         }
         for (let xi = x0; xi <= x1; xi++) {
           const x = world ? ((xi % W) + W) % W : xi; // the world layer wraps across the antimeridian
-          const dLng = ((xi + 0.5) / pxLng + b.lng0 - lng) * cos;
+          const dLng = (xi / pxLng + b.lng0 - lng) * cos;
           const d2 = dLat * dLat + dLng * dLng;
           if (d2 > reach * reach) continue;
-          density[y * W + x] += weight * Math.exp(-d2 * inv2s2);
+          density[y * NX + x] += weight * Math.exp(-d2 * inv2s2);
         }
       }
     }
+    if (world) for (let y = 0; y < NY; y++) density[y * NX + W] = density[y * NX];
 
     let max = 0;
     for (let i = 0; i < density.length; i++) if (density[i] > max) max = density[i];
-    const data = img.data;
     if (max <= 0) {
-      data.fill(0);
-      ctx.putImageData(img, 0, 0);
-      tex.needsUpdate = true;
+      for (const m of fills) m.geometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+      lines.geometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
       return false;
     }
     // square root lifts the thin edges of a range so the low bands are visible
-    for (let i = 0; i < density.length; i++) norm[i] = Math.sqrt(density[i] / max);
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const i = y * W + x;
-        const d = norm[i];
-        const o = i * 4;
-        if (d < CUT[0] * 0.6) {
-          data[o + 3] = 0;
-          continue;
+    for (let i = 0; i < density.length; i++) density[i] = Math.sqrt(density[i] / max);
+
+    const dLat = (b.lat1 - b.lat0) / H;
+    const dLng = (b.lng1 - b.lng0) / W;
+    const latAt = (y: number) => b.lat1 - y * dLat;
+    const lngAt = (x: number) => b.lng0 + x * dLng;
+    const segs: number[] = [];
+
+    fills.forEach((mesh, k) => {
+      const c = CUT[k];
+      const tris: number[] = [];
+      const poly: number[][] = []; // [lat, lng] of the clipped cell, in walk order
+      const kind: number[] = []; // 0 corner, 1 exit crossing (in→out), 2 entry crossing (out→in)
+      const q: number[] = [];
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const v = [
+            density[y * NX + x],
+            density[y * NX + x + 1],
+            density[(y + 1) * NX + x + 1],
+            density[(y + 1) * NX + x],
+          ];
+          const inside = [v[0] >= c, v[1] >= c, v[2] >= c, v[3] >= c];
+          if (!inside[0] && !inside[1] && !inside[2] && !inside[3]) continue;
+          const cl = [latAt(y), latAt(y), latAt(y + 1), latAt(y + 1)];
+          const cg = [lngAt(x), lngAt(x + 1), lngAt(x + 1), lngAt(x)];
+          poly.length = 0;
+          kind.length = 0;
+          for (let i = 0; i < 4; i++) {
+            const j = (i + 1) % 4;
+            if (inside[i]) {
+              poly.push([cl[i], cg[i]]);
+              kind.push(0);
+            }
+            if (inside[i] !== inside[j]) {
+              const t = (c - v[i]) / (v[j] - v[i]);
+              poly.push([cl[i] + (cl[j] - cl[i]) * t, cg[i] + (cg[j] - cg[i]) * t]);
+              kind.push(inside[i] ? 1 : 2);
+            }
+          }
+          for (let i = 1; i + 1 < poly.length; i++) {
+            for (const p of [poly[0], poly[i], poly[i + 1]]) place(p[0], p[1], tris);
+          }
+          // contour: each exit crossing joins the crossing that follows it (an entry), around the cell
+          for (let i = 0; i < poly.length; i++) {
+            if (kind[i] !== 1) continue;
+            const n = poly[(i + 1) % poly.length];
+            q.length = 0;
+            place(poly[i][0], poly[i][1], q);
+            place(n[0], n[1], q);
+            for (const n of q) segs.push(n);
+          }
         }
-        // how fast density changes here, in units per pixel: sets the width of one pixel at each band edge,
-        // so band edges and contours come out anti-aliased instead of stair-stepped
-        const xl = world ? (x - 1 + W) % W : Math.max(0, x - 1);
-        const xr = world ? (x + 1) % W : Math.min(W - 1, x + 1);
-        const gx = (norm[y * W + xr] - norm[y * W + xl]) / 2;
-        const gy = (y > 0 && y < H - 1 ? norm[i + W] - norm[i - W] : 0) / 2;
-        const g = Math.sqrt(gx * gx + gy * gy) + 1e-5;
-        // nearest band edge
-        let k = 0;
-        for (let j = 1; j < CUT.length; j++) if (Math.abs(d - CUT[j]) < Math.abs(d - CUT[k])) k = j;
-        const t = Math.min(1, Math.max(0, (d - CUT[k]) / g + 0.5));
-        const lo = HEAT_BANDS[k];
-        const hi = HEAT_BANDS[k + 1];
-        let r = lo[0] + (hi[0] - lo[0]) * t;
-        let gg = lo[1] + (hi[1] - lo[1]) * t;
-        let bl = lo[2] + (hi[2] - lo[2]) * t;
-        let a = lo[3] + (hi[3] - lo[3]) * t;
-        // one-pixel contour line on the edge, over the fill
-        const line = Math.max(0, 1 - Math.abs(d - CUT[k]) / g) * CONTOUR_ALPHA;
-        if (line > 0) {
-          const na = line + a * (1 - line);
-          r = (CONTOUR[0] * line + r * a * (1 - line)) / na;
-          gg = (CONTOUR[1] * line + gg * a * (1 - line)) / na;
-          bl = (CONTOUR[2] * line + bl * a * (1 - line)) / na;
-          a = na;
-        }
-        data[o] = r;
-        data[o + 1] = gg;
-        data[o + 2] = bl;
-        data[o + 3] = Math.round(a * 255);
       }
-    }
-    ctx.putImageData(img, 0, 0);
-    tex.needsUpdate = true;
+      mesh.geometry.dispose();
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3));
+      mesh.geometry = g;
+    });
+
+    lines.geometry.dispose();
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
+    lines.geometry = lg;
     return true;
   }
 
-  return { mesh, draw };
+  return { mesh: group, draw };
 }
 
 /** The whole range from 2° cells: ~0.18° per pixel, smoothed over about one cell. */
 export function createHeat(globeRadius = R, altitude = 0.0045) {
-  const layer = heatLayer(2048, 1024, globeRadius * (1 + altitude), 0.5);
+  const layer = heatLayer(360, 180, globeRadius * (1 + altitude), 0.5);
   return {
     mesh: layer.mesh,
     /** weights were stored as sqrt(count/max), so square them back */
@@ -203,7 +236,7 @@ export function createHeat(globeRadius = R, altitude = 0.0045) {
  * smoothing radius in degrees.
  */
 export function createDetailHeat(globeRadius = R, altitude = 0.0052) {
-  const layer = heatLayer(1024, 1024, globeRadius * (1 + altitude), 0.55);
+  const layer = heatLayer(320, 320, globeRadius * (1 + altitude), 0.55);
   return {
     mesh: layer.mesh,
     draw(pts: number[][], lat: number, lng: number, halfSpan: number, sigma: number) {
