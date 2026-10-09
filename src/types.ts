@@ -20,7 +20,8 @@ export interface Species {
   imgH: number | null;
   credit: Credit | null;
   iso: string[];
-  countries: { iso: string; share: number }[];
+  /** `introduced` marks a country where every wild population came from people, so it is not native range (data/introduced.csv) */
+  countries: { iso: string; share: number; introduced?: boolean }[];
   continents: string[];
   occurrences: number;
   /** rounding applied to published record points, in degrees (0.1 for threatened animals) */

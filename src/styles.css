@@ -204,7 +204,7 @@ kbd {
 #results li {
   position: relative;
   display: grid;
-  grid-template-columns: 34px 1fr 24px;
+  grid-template-columns: 34px 1fr 32px;
   column-gap: 8px;
   align-items: baseline;
   padding: 9px 0 10px;
@@ -223,9 +223,17 @@ kbd {
 }
 #results li .st {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-3);
+  font-size: 11.5px;
+  color: var(--ink-2);
   text-align: right;
+}
+/* the threatened categories (critically endangered, endangered, vulnerable) are readable at a glance */
+#results li .st[data-s='CR'],
+#results li .st[data-s='EN'] {
+  color: var(--accent);
+}
+#results li .st[data-s='VU'] {
+  color: var(--ink);
 }
 #results li .la {
   grid-column: 2;
@@ -240,11 +248,15 @@ kbd {
   letter-spacing: 0.02em;
   color: var(--accent);
 }
-#results li .off {
+#results li .off,
+#results li .why {
   font-family: var(--mono);
   font-style: normal;
   font-size: 10.5px;
   color: var(--ink-3);
+}
+#results li .why.is-introduced {
+  color: var(--ink-2);
 }
 #results li.is-active .nm {
   color: var(--ink);
@@ -382,27 +394,32 @@ kbd {
   margin: 0 -4px;
 }
 
-/* the status-code key: a small "i" at the end of the Status row opens a panel above the filters */
+/* the status-code key: "What do these mean?" at the end of the Status row opens a panel above the filters */
 .filters {
   position: relative;
 }
 .frow button.info {
-  width: 15px;
-  height: 15px;
   padding: 0;
-  border: 1px solid var(--rule-2);
-  border-radius: 50%;
-  font-size: 9.5px;
-  line-height: 13px;
-  text-align: center;
-  text-decoration: none;
+  font-size: 10.5px;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--rule-2);
+  text-underline-offset: 4px;
   color: var(--ink-3);
-  align-self: center;
 }
 .frow button.info:hover,
 .frow button.info[aria-expanded='true'] {
   color: var(--ink);
-  border-color: var(--ink-2);
+  text-decoration-color: var(--ink-2);
+}
+/* what the picked status means, on its own line under the Status row */
+.frow .status-hint {
+  flex-basis: 100%;
+  padding-left: 70px;
+  line-height: 1.5;
+}
+.frow .status-hint b {
+  font-weight: 400;
+  color: var(--ink-2);
 }
 .status-key {
   position: absolute;
@@ -497,6 +514,13 @@ kbd {
 }
 .plate .back:hover {
   color: var(--ink);
+}
+.map-caveat {
+  margin: 10px 0 16px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
 }
 .plate-no {
   margin: 0 0 12px;
@@ -707,6 +731,17 @@ kbd {
 }
 .range-list button:hover {
   color: var(--accent);
+}
+.range-list li.is-introduced button {
+  color: var(--ink-2);
+}
+.range-list .tag {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
 .range-list button[aria-pressed='true'] {
   color: var(--accent);

@@ -169,6 +169,13 @@ const forms = (w: string) => [w, ...(w.length > 3 && w.endsWith('es') ? [w.slice
 type Match = 'loose' | 'latin' | 'place';
 const PREFIX_FROM: Record<Match, number> = { loose: 1, latin: 6, place: 4 };
 
+/** Why an animal is in the results when its name doesn't say so: "lives in Kenya", "kind: cat". */
+export interface Why {
+  text: string;
+  /** the country it matched, so the list can say when the animal is only introduced there */
+  iso?: string;
+}
+
 interface Doc {
   s: Species;
   fields: { words: string[]; weight: number; match: Match }[];
@@ -214,16 +221,34 @@ export function createSearch(species: Species[], isoName: (iso: string) => strin
     return hits.filter((h) => (h.score ?? 1) <= best + 0.1).map((h) => h.item.s);
   }
 
+  /** The place or kind a typed word matched, for animals whose name doesn't explain the match. */
+  const hits = (name: string, q: string) => words(name).some((w) => w === q || (q.length >= PREFIX_FROM.place && w.startsWith(q)));
+  function reasonFor(d: Doc, q: string, weight: number): Why | null {
+    if (weight === 5) {
+      const kind = (KINDS[d.s.family] ?? []).find((k) => words(k).some((w) => forms(q).some((f) => w === f || w.startsWith(f))));
+      return kind ? { text: `kind: ${kind}` } : null;
+    }
+    if (weight === 3) {
+      const i = d.countryNames.findIndex((n) => hits(n, q));
+      return i >= 0 ? { text: `lives in ${d.countryNames[i]}`, iso: d.s.iso[i] } : null;
+    }
+    const place = [...d.stateNames, ...d.s.continents].find((n) => hits(n, q));
+    return place ? { text: `lives in ${place}` } : null;
+  }
+
   /**
    * Every word typed has to start a word somewhere in the animal: "snow leo" finds the snow leopard, "cat" finds cats
    * but not "Meerkat". An exact name ranks first, then names starting with the query, then by where the words matched.
+   * Animals found through a kind or a place (not their name) also come back with the reason.
    */
-  function byWords(text: string): Species[] {
+  function byWords(text: string): { list: Species[]; why: Map<number, Why> } {
     const qs = words(text);
     const whole = words(text).join(' ');
     const scored: { s: Species; score: number; i: number }[] = [];
+    const why = new Map<number, Why>();
     docs.forEach((d, i) => {
       let score = 0;
+      let because: { q: string; weight: number } | null = null;
       for (const q of qs) {
         let best = 0;
         for (const f of d.fields) {
@@ -238,26 +263,34 @@ export function createSearch(species: Species[], isoName: (iso: string) => strin
         }
         if (!best) return; // one word with no match rules the animal out
         score += best;
+        const weight = Math.floor(best);
+        if (!because && (weight === 5 || weight === 3 || weight === 2)) because = { q, weight };
       }
       const name = words(d.s.name).join(' ');
       if (name === whole) score += 20;
       else if (name.startsWith(whole)) score += 10;
       scored.push({ s: d.s, score, i });
+      const reason = because && reasonFor(d, because.q, because.weight);
+      if (reason) why.set(d.s.id, reason);
     });
-    return scored.sort((a, b) => b.score - a.score || a.i - b.i).map((x) => x.s);
+    return { list: scored.sort((a, b) => b.score - a.score || a.i - b.i).map((x) => x.s), why };
   }
 
-  return function run(q: string, f: Filters): Species[] {
+  /** The matches for what is typed and the filters set, with the reason for each one that isn't a name match. */
+  function search(q: string, f: Filters): { list: Species[]; why: Map<number, Why> } {
     const text = q.trim();
     let list = species;
+    let why = new Map<number, Why>();
     if (text) {
-      list = byWords(text);
+      ({ list, why } = byWords(text));
       if (!list.length && text.length >= 4) list = byTypo(text);
     }
     if (f.continent) list = list.filter((s) => s.continents.includes(f.continent!));
     if (f.status) list = list.filter((s) => s.status === f.status);
     if (f.country) list = list.filter((s) => s.iso.includes(f.country!) || (s.states ?? []).some((x) => x.iso === f.country));
     if (f.state) list = list.filter((s) => (s.states ?? []).some((x) => x.id === f.state));
-    return list;
-  };
+    return { list, why };
+  }
+
+  return { search, run: (q: string, f: Filters) => search(q, f).list };
 }
