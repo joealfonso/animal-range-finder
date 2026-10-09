@@ -879,7 +879,6 @@ async function boot() {
   let blockers: DOMRect[] = [];
   const markLayout = () => (blockersDirty = true);
   window.addEventListener('resize', markLayout);
-  plate.addEventListener('scroll', markLayout, { passive: true });
 
   stage.onFrame((moved) => {
     if (!selected) return;
@@ -921,7 +920,9 @@ async function boot() {
     if (!anchor || plate.hidden) return hideLeader();
     const r = anchor.getBoundingClientRect();
     const ax = r.left - 22;
-    const ay = r.top + 30;
+    // The title scrolls with the plate, but the line stays where it meets the title with the plate at the top, so
+    // scrolling the plate doesn't drag the line with it.
+    const ay = r.top + plate.scrollTop + 30;
     if (!pt.visible || pt.x > ax - 30) return hideLeader();
     const bendX = Math.min(ax - 10, pt.x + 46);
     leaderLine.setAttribute('d', `M${pt.x.toFixed(1)} ${pt.y.toFixed(1)} L${bendX.toFixed(1)} ${ay.toFixed(1)} L${ax.toFixed(1)} ${ay.toFixed(1)}`);
