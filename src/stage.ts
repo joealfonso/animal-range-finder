@@ -9,6 +9,8 @@ const BASE = import.meta.env.BASE_URL;
 const R = 100; // globe.gl world radius
 const ACCENT = new THREE.Color('#ff5a36');
 const INK = new THREE.Color('#ece8e0');
+// The country or state you picked is cool blue, so it never reads as part of the orange heat (and range outlines).
+const PICK = new THREE.Color('#6cc4ff');
 
 export interface StageOptions {
   small: boolean;
@@ -192,7 +194,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     states: lineLayer(INK, 0.3, 0.006, 3),
     marked: lineLayer(ACCENT, 0.5, 0.007, 4),
     hover: lineLayer(INK, 0.85, 0.008, 5),
-    active: lineLayer(ACCENT, 1, 0.009, 6),
+    active: lineLayer(PICK, 1, 0.009, 6),
   };
   for (const l of Object.values(layers)) scene.add(l.obj);
   layers.base.set(countries.map((c) => countrySegs(c.properties.iso)));
@@ -204,7 +206,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   // Fills: only the one or two shapes that are actually chosen get a filled polygon.
   globe
     .polygonCapColor((d: any) =>
-      'id' in d.properties ? 'rgba(255,90,54,0.22)' : 'rgba(255,90,54,0.14)',
+      'id' in d.properties ? 'rgba(108,196,255,0.2)' : 'rgba(108,196,255,0.12)',
     )
     .polygonSideColor(() => 'rgba(0,0,0,0)')
     .polygonStrokeColor(() => null as unknown as string)
