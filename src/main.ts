@@ -49,7 +49,7 @@ const CONTINENT_SHORT: Record<string, string> = {
   Oceania: 'Oceania',
   Antarctica: 'Antarctica',
 };
-const STATUS_ORDER = ['CR', 'EN', 'VU', 'NT', 'LC', 'DD', 'NE'];
+const STATUS_ORDER = ['CR', 'EN', 'VU', 'NT', 'LC', 'DD', 'NE', 'VAR'];
 /** Where the camera goes when a continent is picked under "Where": roughly centred, with the whole continent in view. */
 const CONTINENT_POV: Record<string, Pov> = {
   Africa: { lat: 2, lng: 18, altitude: 1.75 },
