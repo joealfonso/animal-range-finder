@@ -177,6 +177,26 @@ kbd {
   white-space: pre;
 }
 
+.daily {
+  display: block;
+  margin-top: 10px;
+  padding: 0;
+  pointer-events: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-align: left;
+}
+.daily:empty {
+  display: none;
+}
+.daily:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* ---------- index (left) ---------- */
 
 .index {
@@ -483,6 +503,17 @@ kbd {
   align-items: baseline;
   gap: 16px;
   margin-bottom: 20px;
+}
+.plate-bar .share {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.plate-bar .share:hover {
+  color: var(--accent);
 }
 .plate .plate-bar .back {
   margin-bottom: 0;
