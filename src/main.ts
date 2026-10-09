@@ -599,9 +599,8 @@ async function boot() {
 
   stage.onCountryClick((iso) => {
     if (selected) {
-      if (filters.country && iso !== filters.country) return movePlace(iso, null);
-      // any country, not just the range: the plate says how many records come from it, even none
-      if (iso !== activeCountry) zoomCountry(iso);
+      // Picking a place is the primary interaction: a different country replaces the open animal with that place's list
+      if (iso !== (activeCountry ?? filters.country)) return movePlace(iso, null);
       return;
     }
     if (filters.country === iso) return;
@@ -622,7 +621,7 @@ async function boot() {
 
   stage.onStateClick((id) => {
     const f = stateById.get(id);
-    if (selected && filters.country && f && id !== filters.state) return movePlace(f.properties.iso, id);
+    if (selected && f && id !== activeState && id !== filters.state) return movePlace(f.properties.iso, id);
     const current = selected ? activeState : filters.state;
     if (id === current) return;
     zoomState(id);
