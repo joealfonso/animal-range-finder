@@ -45,6 +45,16 @@ type Pt = [number, number, string | null]; // lat, lng, ISO country code
 // and the sample. Dogs (and the dingo) are filed under the wolf, and make up about half of its records.
 const EXCLUDE: Record<string, number[]> = {
   'Canis lupus': [6164210 /* Canis lupus familiaris, dogs */, 6164184 /* Canis lupus dingo */],
+  // the mountain gorilla is the other eastern gorilla subspecies; Grauer's gorilla lives in the lowlands of the DR Congo
+  'Gorilla beringei': [4267322 /* Gorilla beringei graueri, Grauer's gorilla */],
+};
+
+// IUCN categories GBIF has wrong or missing, set by hand and keyed by the scientific name shown in the app.
+// GBIF holds the eastern gorilla's species-wide category (CR) but none for the mountain gorilla subspecies (EN since 2018),
+// and lists the eland as not evaluated because its IUCN entry sits under the old genus name (LC).
+const STATUS_OVERRIDE: Record<string, string> = {
+  'Gorilla beringei': 'EN',
+  'Tragelaphus oryx': 'LC',
 };
 
 // Hand corrections for continents whose only records there are zoo or captive animals GBIF does not flag.
@@ -363,6 +373,7 @@ await Promise.all(Array.from({ length: 6 }, worker));
 
 // cached records may predate newer group mappings
 for (const s of out) s.group = GROUPS[s.group] ?? (s.group === 'Animal' ? 'Fish' : s.group);
+for (const s of out) s.status = STATUS_OVERRIDE[s.sci] ?? s.status;
 for (const s of out) s.states = await assignStates(s.points, s.iso);
 
 // Continents. Natural Earth files all of Russia under Europe, so Russian records are split at the Urals (60°E):
