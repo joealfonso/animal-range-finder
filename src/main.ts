@@ -6,6 +6,7 @@ import './styles.css';
 
 import { createStage } from './stage';
 import { createSearch, type Filters, type Why } from './search';
+import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
@@ -75,6 +76,7 @@ async function boot() {
   const byIso = new Map([...countries].reverse().map((c) => [c.properties.iso, c]));
   const isoName = (iso: string) => byIso.get(iso)?.properties.name ?? iso;
   const byId = new Map(species.map((s) => [s.id, s]));
+  const slugs = makeSlugs(species);
 
   const stage = createStage($('globe'), countries, { small, reduced });
   const { run, search } = createSearch(species, isoName);
@@ -719,6 +721,7 @@ async function boot() {
     plate.innerHTML = `
       <div class="plate-bar">
         <button class="back" type="button" id="back">← Back <kbd>Esc</kbd></button>
+        <button class="share" type="button" data-action="share">Share</button>
         <span class="modes" role="group" aria-label="Show the range as">
           <button type="button" data-mode="heat" aria-pressed="${rangeMode === 'heat'}">Heatmap</button>
           <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>
@@ -818,11 +821,38 @@ async function boot() {
     }A sample of records, not every sighting: it could well be closer.</p></dd></div>`;
   }
 
+  /** Share the open animal's page (/animal/<name>/): it has its own title, photo and description for link previews, and opens the globe. */
+  async function share(btn: HTMLButtonElement) {
+    const s = selected;
+    if (!s) return;
+    const url = `${location.origin}/animal/${slugs.get(s.id)}/`;
+    const text = `${s.name}: where it lives, on a 3D globe`;
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+      try {
+        await navigator.share({ title: s.name, text, url });
+        return;
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      btn.textContent = 'Link copied';
+    } catch {
+      btn.textContent = 'Copy failed';
+    }
+    setTimeout(() => {
+      btn.textContent = 'Share';
+    }, 1800);
+  }
+
   plate.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('#back')) return void back();
     if (t.closest('[data-action="full-range"]')) return void showFullRange();
     if (t.closest('[data-action="sound"]')) return void toggleSound();
+    const sh = t.closest<HTMLButtonElement>('[data-action="share"]');
+    if (sh) return void share(sh);
     const mb = t.closest<HTMLElement>('button[data-mode]');
     if (mb) {
       rangeMode = mb.dataset.mode === 'points' ? 'points' : 'heat';
@@ -1107,6 +1137,15 @@ async function boot() {
   window.addEventListener('resize', () => {
     stage.resize();
     stage.shiftTo(...offset(!!selected, !!near), 0);
+  });
+
+  // ---------- animal of the day ----------
+  const today = animalOfTheDay(species);
+  const dailyBtn = $('daily');
+  dailyBtn.textContent = `Today: ${today.name} →`;
+  dailyBtn.addEventListener('click', () => {
+    q.blur();
+    void select(today);
   });
 
   // ---------- go ----------

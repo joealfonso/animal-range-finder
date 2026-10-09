@@ -5,6 +5,7 @@
 // Run: npm run build (this runs after vite build). Pass another folder to write somewhere else.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { STATUS_LABEL, STATUS_NOTE, type Species } from '../src/types';
+import { makeSlugs } from '../src/slug';
 
 const SITE = 'https://animalrangefinder.com';
 const DIST = process.argv[2] ?? 'dist';
@@ -17,19 +18,7 @@ const countryName = new Map<string, string>(countries.features.map((f: any) => [
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const json = (o: unknown) => JSON.stringify(o).replace(/</g, '\\u003c');
-const slugify = (s: string) =>
-  s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-// common name, or the Latin name when two animals share a common name
-const slugs = new Map<number, string>();
-const taken = new Set<string>();
-for (const s of species) {
-  let slug = slugify(s.name) || slugify(s.sci);
-  if (taken.has(slug)) slug = slugify(`${s.name} ${s.sci}`);
-  if (taken.has(slug)) slug = `${slug}-${s.id}`;
-  taken.add(slug);
-  slugs.set(s.id, slug);
-}
+const slugs = makeSlugs(species);
 const urlOf = (s: Species) => `${SITE}/animal/${slugs.get(s.id)}/`;
 
 const list = (xs: string[]) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
