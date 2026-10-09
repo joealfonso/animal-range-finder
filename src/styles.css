@@ -595,7 +595,7 @@ kbd {
   color: var(--ink-2);
 }
 .status-note {
-  max-width: 30ch;
+  max-width: none;
   font-size: 10.5px;
   line-height: 1.5;
   color: var(--ink-3);
@@ -827,6 +827,36 @@ kbd {
 }
 .prov a {
   color: var(--ink-2);
+}
+.prov p {
+  margin: 8px 0 0;
+}
+
+/* secondary detail the reader opens only when they want it */
+.more > summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  width: fit-content;
+}
+.more > summary::-webkit-details-marker {
+  display: none;
+}
+.more > summary::before {
+  content: '+ ';
+}
+.more[open] > summary::before {
+  content: '− ';
+}
+.more > summary:hover {
+  color: var(--ink-2);
+}
+.more[open] > summary {
+  margin-bottom: 6px;
 }
 
 /* ---------- leader line + pins ---------- */
