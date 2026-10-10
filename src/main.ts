@@ -812,7 +812,6 @@ async function boot() {
         ${photo}
         <div class="titles">
           <h2>${esc(s.name)}</h2>
-          <p class="sci">${esc(s.sci)}</p>
           <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span>${
             STATUS_NOTE[s.status]
               ? `<details class="more status-more"><summary>What this means</summary><span class="status-note">${STATUS_NOTE[s.status]}${s.countries.some((x) => x.introduced) ? ' The rating is for its native range.' : ''}</span></details>`

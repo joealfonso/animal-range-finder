@@ -14,6 +14,8 @@ const MIN_MONTH = 30; // records a month needs to count
 const MIN_MONTHS = 10; // months that must have enough records
 const MIN_MOVE_KM = 3500; // the year's records must shift at least this far for it to count as migration
 const MAX_JUMP = 0.4; // the average hop from one month to the next may be at most this share of the year's biggest change
+// Animals the filter lets through that do not migrate: invasive or farmed ranges and observer hotspots that change with the season.
+const NOT_MIGRANTS = new Set(['American bullfrog', 'Cane toad', 'North American beaver', 'California quail', 'Capybara', 'Buff-tailed bumblebee']);
 const CELL = 6; // degrees; records this close share one place
 const KEEP = 12; // places kept per month
 
@@ -112,6 +114,7 @@ async function one(s: Species) {
   // the biggest change between any two months, and the change between neighbouring months
   let far = 0;
   for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (counts[i] >= MIN_MONTH && counts[j] >= MIN_MONTH) far = Math.max(far, shift(months[i], months[j]));
+  if (NOT_MIGRANTS.has(s.name)) return `${s.name}: left out by hand`;
   if (far < MIN_MOVE_KM) return `${s.name}: stays put (${Math.round(far)} km)`;
   // a real seasonal move is smooth: neighbouring months look alike. Month-to-month jumps as big as the year's biggest
   // change mean the sample is just noisy (a few busy hotspots, or a different set of observers each month)
