@@ -2,7 +2,7 @@ import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
 import { createDetailHeat, createHeat } from './heat';
-import { createMigration, type Place } from './migration';
+import { createMigration, type Place, type Routes } from './migration';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -36,7 +36,7 @@ export interface Stage {
   /** heat: smoothed record-density bands; points: every sampled wild record */
   setRangeMode(mode: 'heat' | 'points' | 'migration'): void;
   /** Month by month places for the migration view (null clears it) */
-  showMigration(months: Place[][] | null, seed?: number): void;
+  showMigration(months: Place[][] | null, seed?: number, routes?: Routes | null): void;
   /** t is months since the start of the year, 0 to 12. Playing advances it; `cb` is told each frame. */
   setMigrationTime(t: number): void;
   setMigrationPlaying(on: boolean): void;
@@ -641,9 +641,9 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       heat.hide();
       applyMode();
     },
-    showMigration(months, seed) {
+    showMigration(months, seed, routes) {
       migHas = !!months;
-      migration.show(months, seed);
+      migration.show(months, seed, routes);
       if (months) migration.setTime(migT);
       applyMode();
     },
