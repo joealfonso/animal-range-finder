@@ -10,7 +10,7 @@ import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
-import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
+import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type More, type Pov, type Species, type StateFeature } from './types';
 
 const BASE = import.meta.env.BASE_URL;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -363,6 +363,8 @@ async function boot() {
 
   // ---------- selecting animals ----------
   const pointCache = new Map<number, number[][]>();
+  const moreCache = new Map<number, More | null>(); // the longer descriptions, loaded when first opened
+  const moreOpen = new Set<number>(); // which are open, so a redraw of the plate keeps them open
   async function loadPoints(s: Species): Promise<number[][]> {
     const hit = pointCache.get(s.id);
     if (hit) return hit;
@@ -751,6 +753,7 @@ async function boot() {
         </div>
       </div>
       <p class="desc">${esc(s.desc)}</p>
+      ${moreBlock(s)}
       <dl class="facts">
         ${nearFact(s)}
         <div><dt>Range</dt><dd><ul class="range-list">${[...s.countries.filter((x) => !x.introduced), ...s.countries.filter((x) => x.introduced)]
@@ -798,6 +801,42 @@ async function boot() {
     plate.hidden = false;
     if (focusedIso) plate.querySelector<HTMLElement>(`button[data-iso="${focusedIso}"]`)?.focus();
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();
+  }
+
+  /** "Read more": the rest of the Wikipedia introduction and a few sentences each on looks, behaviour, diet, home and young. */
+  function moreBody(s: Species) {
+    const m = moreCache.get(s.id);
+    if (m === undefined) return '<p class="more-wait">Loading…</p>';
+    if (!m) return '<p class="more-wait">Could not load this just now.</p>';
+    return `${m.intro ? `<p>${esc(m.intro)}</p>` : ''}${m.sections.map((x) => `<h3>${esc(x.h)}</h3><p>${esc(x.t)}</p>`).join('')}${
+      s.wiki ? `<p class="more-src">From ${extLink(s.wiki, 'Wikipedia')}, CC BY-SA 4.0, where there is much more.</p>` : ''
+    }`;
+  }
+  function moreBlock(s: Species) {
+    if (!s.more) return '';
+    return `<details class="more desc-more" data-more="${s.id}"${moreOpen.has(s.id) ? ' open' : ''}><summary>Read more</summary><div class="more-body">${
+      moreOpen.has(s.id) ? moreBody(s) : ''
+    }</div></details>`;
+  }
+  async function toggleMore(d: HTMLDetailsElement) {
+    const id = Number(d.dataset.more);
+    const s = byId.get(id);
+    if (!s) return;
+    const fill = () => {
+      const box = plate.querySelector<HTMLElement>(`details[data-more="${id}"] .more-body`);
+      if (box) box.innerHTML = moreBody(s);
+    };
+    if (!d.open) return void moreOpen.delete(id);
+    moreOpen.add(id);
+    if (moreCache.get(id)) return fill();
+    moreCache.delete(id); // a failed try is retried when it is opened again
+    fill();
+    const m: More | null = await fetch(`${BASE}data/more/${id}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    moreCache.set(id, m);
+    fill();
+    blockersDirty = true; // the panel grew
   }
 
   /** A play button for the animal's call, credited like the photo. */
@@ -857,6 +896,12 @@ async function boot() {
       btn.textContent = 'Share';
     }, 1800);
   }
+
+  // a <details> toggle doesn't bubble, so listen on the way down
+  plate.addEventListener('toggle', (e) => {
+    const d = e.target as HTMLElement;
+    if (d instanceof HTMLDetailsElement && d.dataset.more) void toggleMore(d);
+  }, true);
 
   plate.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;

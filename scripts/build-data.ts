@@ -6,6 +6,7 @@
 // followed whichever datasets GBIF listed first, so it said nothing reliable about where the records are.
 // To add species: append a row to data/species.csv and run `npm run data`. Finished species are cached in .cache/.
 // No API keys are needed. If one is ever added, read it from process.env and document it in .env.example.
+import { tidy } from './lib/text';
 import sharp from 'sharp';
 import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { fetchSquares, fetchCells, squaresOf, centreOf, squareOf, SQUARE_DEG, COLS } from './lib/density';
@@ -494,7 +495,7 @@ async function build(row: { scientific: string; wikipedia: string; name: string 
   if (!wiki?.extract) throw new Error('no wikipedia summary');
   // a plain regex split dropped text at decimals ("7.0 oz") and left descriptions starting mid-sentence
   const sentences = [...new Intl.Segmenter('en', { granularity: 'sentence' }).segment(wiki.extract)].map((x) => x.segment);
-  const desc = sentences.slice(0, 3).join('').trim();
+  const desc = tidy(sentences.slice(0, 3).join('').trim());
 
   // Photo with a licence we can redistribute
   let img: string | null = null;

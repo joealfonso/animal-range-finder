@@ -34,7 +34,16 @@ export interface Species {
   /** states/provinces holding a fair share of the records, largest share first */
   states: StateShare[];
   /** a short recording of its call, for animals with one on Commons (data/sounds.csv) */
+  /** there is a longer description to load when the reader asks for it */
+  more?: boolean;
   sound?: Sound;
+}
+
+/** The longer text behind "Read more" (public/data/more/<id>.json), cut from the animal's Wikipedia article. */
+export interface More {
+  /** the rest of the article's introduction, after the short description */
+  intro?: string;
+  sections: { h: string; t: string }[];
 }
 
 export interface Sound {

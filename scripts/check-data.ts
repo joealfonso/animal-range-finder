@@ -79,6 +79,19 @@ for (const s of species) {
     if (!(await exists(`${PUB}/${s.img}`))) fail(at, `photo ${s.img} is missing`);
     if (!isNum(s.imgW) || !isNum(s.imgH)) fail(at, 'photo has no width/height');
   }
+  // "Read more": the flag and the file have to agree, and every paragraph is whole sentences, not scraps of a list
+  const morePath = `${PUB}/data/more/${s.id}.json`;
+  if (Boolean(s.more) !== (await exists(morePath))) fail(at, s.more ? `more text is missing (${morePath})` : `${morePath} exists but the animal is not flagged more`);
+  if (s.more) {
+    const m = await readJSON(morePath);
+    const paras: string[] = [m.intro, ...(m.sections ?? []).map((x: any) => x.t)].filter(Boolean);
+    if (!paras.length) fail(at, 'more text is empty');
+    for (const x of m.sections ?? []) if (typeof x.h !== 'string' || !x.h) fail(at, 'a more section has no heading');
+    for (const para of paras) {
+      if (!/^[A-Z0-9“"‘']/u.test(para) || !/[.!?”"’)]$/u.test(para)) fail(at, `more text is not whole sentences: "${para.slice(0, 40)}…${para.slice(-20)}"`);
+      if (/\[\d+\]|\(\s*\)|\s[;,]/.test(para)) fail(at, `more text has leftovers from Wikipedia markup: "${para.slice(0, 40)}"`);
+    }
+  }
   if (s.sound) {
     if (!(await exists(`${PUB}/${s.sound.src}`))) fail(at, `sound ${s.sound.src} is missing`);
     if (!isNum(s.sound.dur) || s.sound.dur <= 0) fail(at, 'sound has no duration');
