@@ -79,6 +79,11 @@ async function boot() {
   const slugs = makeSlugs(species);
 
   const stage = createStage($('globe'), countries, { small, reduced });
+  // places with no recorded animals can be hovered but not opened
+  stage.setPopulated(
+    new Set(species.flatMap((s) => s.states.map((x) => x.id))),
+    new Set(species.flatMap((s) => [...s.iso, ...s.states.map((x) => x.iso)])),
+  );
   const { run, search } = createSearch(species, isoName);
 
   // ---------- state ----------

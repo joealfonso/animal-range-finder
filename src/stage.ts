@@ -26,6 +26,8 @@ export interface Stage {
   setStates(states: StateFeature[] | null): void;
   /** active: the chosen state; marked: states where the open animal was recorded */
   setStateMarks(active: string | null, marked: Set<string>): void;
+  /** Places where at least one animal was recorded; every other state or country is hover-only. */
+  setPopulated(states: Set<string>, countries: Set<string>): void;
   /** How close we are: record points grow a little as you drill from the whole range to a country to a state. */
   setRangeDetail(level: 'range' | 'country' | 'state'): void;
   /** cells feed the heatmap; points are the individual (rounded) wild records */
@@ -337,15 +339,18 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     return { lat, lng };
   }
 
+  let populatedStates: Set<string> | null = null;
+  let populatedCountries: Set<string> | null = null;
+
   function pickAtScreen(clientX: number, clientY: number) {
     const ll = screenToLatLng(clientX, clientY);
     if (!ll) return null;
     if (pickStates.length) {
       const s = pickAt(pickStates, ll.lat, ll.lng);
-      if (s) return { state: s };
+      if (s) return { state: s, empty: !!populatedStates && !populatedStates.has(s.properties.id) };
     }
     const c = pickAt(pickCountries, ll.lat, ll.lng);
-    return c ? { country: c } : null;
+    return c ? { country: c, empty: !!populatedCountries && !populatedCountries.has(c.properties.iso) } : null;
   }
 
   let pointer: { x: number; y: number } | null = null;
@@ -357,14 +362,16 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     hoverQueued = false;
     if (!pointer || dragging) return;
     const hit = pickAtScreen(pointer.x, pointer.y);
-    const nextState = hit?.state?.properties.id ?? null;
-    const nextIso = hit?.country?.properties.iso ?? null;
+    // a place with no animals gets a tooltip but no highlight and no pointer cursor
+    const live = hit && !hit.empty ? hit : null;
+    const nextState = live?.state?.properties.id ?? null;
+    const nextIso = live?.country?.properties.iso ?? null;
     if (nextState !== hoverState || nextIso !== hoverIso) {
       hoverState = nextState;
       hoverIso = nextIso;
       paint();
     }
-    canvas.style.cursor = pinMode ? 'crosshair' : hit ? 'pointer' : '';
+    canvas.style.cursor = pinMode ? 'crosshair' : live ? 'pointer' : '';
     if (hit) {
       const p = hit.state?.properties;
       // built with textContent so place names from the border files can never be read as markup
@@ -375,6 +382,11 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
         const sub = document.createElement('small');
         sub.textContent = `${p.kind}, ${p.countryName ?? p.iso}`;
         label.append(sub);
+      }
+      if (hit.empty && !pinMode) {
+        const none = document.createElement('small');
+        none.textContent = 'No animals recorded here yet';
+        label.append(none);
       }
       tip.replaceChildren(label);
       tip.classList.add('on');
@@ -418,6 +430,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       return;
     }
     const hit = pickAtScreen(e.clientX, e.clientY);
+    if (hit?.empty) return;
     if (hit?.state) stateClickCb(hit.state.properties.id);
     else if (hit?.country) clickCb(hit.country.properties.iso);
   });
@@ -550,6 +563,10 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     setFilterCountry(iso) {
       filterIso = iso;
       paint();
+    },
+    setPopulated(st, co) {
+      populatedStates = st;
+      populatedCountries = co;
     },
     setStates(next) {
       states = next ?? [];
