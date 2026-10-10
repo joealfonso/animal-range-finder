@@ -1,4 +1,4 @@
-// Builds public/data/near.json, the index behind "What lives here": for every 1° cell that holds a sampled wild record,
+// Builds public/data/near.json, the index behind "What lives here": for every 1° cell that holds a wild record,
 // the animals recorded in it. The app reads it to find which animals to look at for a pin, then fetches only those
 // animals' point files to measure the distance to the nearest record. Runs at the end of `npm run data`; it only reads
 // what is already in public/, so it needs no network.

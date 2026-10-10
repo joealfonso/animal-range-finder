@@ -4,6 +4,10 @@
 // or an iNaturalist observation URL (its first freely licensed recording is used). Each file is kept only if
 // its licence is CC0, CC BY, CC BY-SA or public domain, like the photos. The loudest stretch of up to 12 seconds is cut
 // out, faded and levelled, so a long field recording plays the call itself and every animal plays at the same volume.
+// Each source is checked against the animal before it is kept: an iNaturalist observation must be research grade and
+// identified as this species, and a Commons file must name the animal (or its genus or common name) in its title,
+// description or categories. A name can still sit on the wrong sound, so the labels are not proof, but a clip of another
+// animal (the magpie's was a black woodpecker) or of an unconfirmed identification no longer gets through.
 // Runs after build-data in `npm run data`. Needs ffmpeg on the PATH (brew install ffmpeg). Finished clips are cached
 // in .cache/sounds/, so a rerun only fetches rows that are new or point at a different file.
 import { readFile, writeFile, mkdir, access, readdir, unlink } from 'node:fs/promises';
@@ -70,7 +74,7 @@ async function loudest(file: string) {
   return { start: at / 4, dur };
 }
 
-type Source = { url: string; ext: string; credit: Sound['credit'] };
+type Source = { url: string; ext: string; credit: Sound['credit']; about: string };
 
 /** A Wikimedia Commons file, by its name. */
 async function fromCommons(file: string): Promise<Source> {
@@ -84,6 +88,7 @@ async function fromCommons(file: string): Promise<Source> {
   return {
     url: ii.url,
     ext: file.slice(file.lastIndexOf('.')),
+    about: `${file} ${clean(md?.ImageDescription?.value ?? '')} ${clean(md?.Categories?.value ?? '')} ${clean(md?.ObjectName?.value ?? '')}`,
     credit: {
       author: clean(md?.Artist?.value ?? '') || 'Unknown',
       license: clean(md?.LicenseShortName?.value ?? ''),
@@ -109,6 +114,7 @@ async function fromINat(url: string): Promise<Source> {
     signal: AbortSignal.timeout(25000),
   }).then((res) => res.json());
   const o = r?.results?.[0];
+  if (o?.quality_grade !== 'research') throw new Error(`observation ${obsId} is "${o?.quality_grade}", not research grade`);
   const snd = o?.sounds?.find((x: any) => INAT[x.license_code] && x.file_url);
   if (!snd) throw new Error(`observation ${obsId} has no recording we can redistribute`);
   const file = String(snd.file_url).split('?')[0];
@@ -116,12 +122,29 @@ async function fromINat(url: string): Promise<Source> {
   return {
     url: snd.file_url,
     ext: file.slice(file.lastIndexOf('.')),
+    about: o.taxon?.name ?? '',
     credit: { author: clean(o.user?.name || o.user?.login || '') || 'Unknown', license, licenseUrl, page: `https://www.inaturalist.org/observations/${obsId}` },
   };
 }
 
-async function build(sci: string, file: string, id: number): Promise<Omit<Sound, 'label'>> {
-  const src = /^https?:\/\/(www\.)?inaturalist\.org\//.test(file) ? await fromINat(file) : await fromCommons(file);
+/** Checked by hand: the file names the animal in a way the check cannot read (a Dutch word, a synonym). */
+const NAME_OK = new Set(['Phoca vitulina', 'Dryophytes cinereus']);
+
+function checkAbout(sci: string, name: string, about: string, inat: boolean) {
+  if (inat) {
+    if (!about.toLowerCase().startsWith(sci.toLowerCase())) throw new Error(`the observation is identified as "${about}", not ${sci}`);
+    return;
+  }
+  const hay = about.toLowerCase();
+  const words = [sci.toLowerCase(), sci.split(' ')[0].toLowerCase(), ...name.toLowerCase().split(/[\s-]+/).filter((w) => w.length > 3)];
+  if (!words.some((w) => hay.includes(w)) && !NAME_OK.has(sci)) throw new Error('the file does not mention this animal; check it, then add it to NAME_OK');
+  if (/pronunciation|spoken|read aloud|lingua libre/.test(hay)) throw new Error('the file is a spoken word, not the animal');
+}
+
+async function build(sci: string, name: string, file: string, id: number): Promise<Omit<Sound, 'label'>> {
+  const inat = /^https?:\/\/(www\.)?inaturalist\.org\//.test(file);
+  const src = inat ? await fromINat(file) : await fromCommons(file);
+  checkAbout(sci, name, src.about, inat);
   if (!okLicense(src.credit.license)) throw new Error(`licence "${src.credit.license}" is not one we can redistribute`);
 
   const raw = `.cache/sounds/raw/${id}${src.ext}`;
@@ -151,6 +174,8 @@ const data = JSON.parse(await readFile(`${PUB}/data/species.json`, 'utf8')) as {
 const bySci = new Map(data.species.map((s) => [s.sci, s]));
 const kept = new Set<string>();
 const failed: string[] = [];
+// a sound whose row was removed (or whose source fails the checks) must not stay on the animal
+for (const s of data.species) delete s.sound;
 for (const [sci, file, label] of rows) {
   const s = bySci.get(sci);
   if (!s) {
@@ -161,7 +186,7 @@ for (const [sci, file, label] of rows) {
   try {
     let rec = (await exists(cacheFile)) ? JSON.parse(await readFile(cacheFile, 'utf8')) : null;
     if (!rec || rec.file !== file || !(await exists(`${PUB}/sound/${s.id}.mp3`))) {
-      rec = { file, ...(await build(sci, file, s.id)) };
+      rec = { file, ...(await build(sci, s.name, file, s.id)) };
       await writeFile(cacheFile, JSON.stringify(rec));
     }
     const { file: _, ...sound } = rec;
@@ -170,6 +195,7 @@ for (const [sci, file, label] of rows) {
   } catch (e: any) {
     failed.push(`${sci}: ${e.message}`);
     console.log('skip', sci, '-', e.message);
+    kept.add(`${s.id}.mp3`); // a failed fetch keeps its old file for the next run; the animal has no sound until it passes
   }
 }
 

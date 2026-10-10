@@ -4,7 +4,8 @@
 // structured data, and links into the globe at /#<id>.
 // Run: npm run build (this runs after vite build). Pass another folder to write somewhere else.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { STATUS_LABEL, STATUS_NOTE, type Species } from '../src/types';
+import { readFileSync } from 'node:fs';
+import { STATUS_LABEL, STATUS_NOTE, type More, type Species } from '../src/types';
 import { makeSlugs } from '../src/slug';
 
 const SITE = 'https://animalrangefinder.com';
@@ -23,6 +24,15 @@ const urlOf = (s: Species) => `${SITE}/animal/${slugs.get(s.id)}/`;
 
 const list = (xs: string[]) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const firstSentence = (t: string) => (t.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? t).slice(0, 200);
+
+/** The longer description (public/data/more), as plain headed paragraphs so search engines see it too. */
+function moreHtml(s: Species) {
+  if (!s.more) return '';
+  const m = JSON.parse(readFileSync(`public/data/more/${s.id}.json`, 'utf8')) as More;
+  return [m.intro ? `<p>${esc(m.intro)}</p>` : '', ...m.sections.map((x) => `<h2>${esc(x.h)}</h2><p>${esc(x.t)}</p>`)]
+    .filter(Boolean)
+    .join('\n        ');
+}
 
 function shell(opts: { title: string; description: string; url: string; image?: string; body: string; ld: unknown[] }) {
   return `<!doctype html>
@@ -75,7 +85,7 @@ function animalPage(s: Species) {
         <p class="sci"><i>${esc(s.sci)}</i> · ${esc(s.family)}</p>
 ${s.img ? `        <figure><img src="/${esc(s.img)}" width="${s.imgW ?? ''}" height="${s.imgH ?? ''}" alt="${esc(s.name)}" />${
           s.credit ? `<figcaption>Photo: ${esc(s.credit.author)}, <a href="${esc(s.credit.page)}">${esc(s.credit.license)}</a></figcaption>` : ''
-        }</figure>\n` : ''}        <p>${esc(s.desc)}</p>
+        }</figure>\n` : ''}        <p>${esc(s.desc)}</p>${moreHtml(s)}
         <h2>Where the ${esc(s.name)} lives</h2>
         ${where}
         <p><a class="cta" href="/#${s.id}">See the ${esc(s.name)}’s range on the globe</a></p>

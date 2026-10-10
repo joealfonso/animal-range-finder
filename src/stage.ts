@@ -2,7 +2,6 @@ import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
 import { createDetailHeat, createHeat } from './heat';
-import { createMigration, type Place, type Routes } from './migration';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -32,18 +31,9 @@ export interface Stage {
   /** How close we are: record points grow a little as you drill from the whole range to a country to a state. */
   setRangeDetail(level: 'range' | 'country' | 'state'): void;
   /** cells feed the heatmap; points are the individual (rounded) wild records */
-  showRange(cells: Cell[], points: number[][]): void;
-  /** heat: smoothed record-density bands; points: every sampled wild record */
-  setRangeMode(mode: 'heat' | 'points' | 'migration'): void;
-  /** Month by month places for the migration view (null clears it) */
-  showMigration(months: Place[][] | null, seed?: number, routes?: Routes | null): void;
-  /** t is months since the start of the year, 0 to 12. Playing advances it; `cb` is told each frame. */
-  setMigrationTime(t: number): void;
-  setMigrationPlaying(on: boolean): void;
-  onMigrationTime(cb: (t: number) => void): void;
-  /** Time travel: draw these cells (the range through an earlier year) instead of the current ones; null goes back. The
-   *  zoomed-in detail layer is built from today's records, so it stays off while a past year is shown. */
-  setPast(cells: Cell[] | null): void;
+  showRange(cells: Cell[], points: number[][], opts?: { coarse?: boolean }): void;
+  /** heat: smoothed record-density bands; points: every place with a wild record */
+  setRangeMode(mode: 'heat' | 'points'): void;
   clearRange(): void;
   project(lat: number, lng: number): { x: number; y: number; visible: boolean };
   shiftTo(x: number, y: number, ms: number): void;
@@ -250,17 +240,10 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     }
   }
 
-  // ---- range, two ways: a heatmap of record density, or every sampled wild record as its own point
+  // ---- range, two ways: a heatmap of record density, or every place with a wild record as its own point
   const heat = createHeat(R);
   scene.add(heat.mesh);
-  let rangeMode: 'heat' | 'points' | 'migration' = 'heat';
-  const migration = createMigration(R, dpr);
-  scene.add(migration.group);
-  const MONTH_MS = reduced ? 3000 : 1700;
-  let migT = 0;
-  let migPlaying = false;
-  let migHas = false;
-  let migCb: (t: number) => void = () => {};
+  let rangeMode: 'heat' | 'points' = 'heat';
   let hasRange = false;
 
   // Zoomed in, the world heatmap (2° cells, banded against the whole range) is too coarse: it blurs past the records
@@ -271,11 +254,10 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   const detail = createDetailHeat(R);
   scene.add(detail.mesh);
   let rangePts: number[][] = [];
+  let coarse = false; // the points are ~75 km squares, so zooming in must not redraw them as if they were exact places
   let detailOn = false; // the detail layer is drawn for roughly the current view and is showing instead of the world one
   let drawnAt: { lat: number; lng: number; altitude: number; halfSpan: number } | null = null;
   let lastMoveT = 0;
-  let curCells: Cell[] = [];
-  let past = false; // a past year is on show: only the world layer, from the era cells
   let detailCheck = false; // the camera moved (or the range changed) since the detail layer was last looked at
 
   // Points: one draw call for all records; a fixed size on screen so single records stay legible when zoomed in.
@@ -312,11 +294,9 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     heat.setVisible(hasRange && rangeMode === 'heat' && !detailOn);
     detail.setVisible(hasRange && rangeMode === 'heat' && detailOn);
     records.visible = hasRange && rangeMode === 'points';
-    migration.setVisible(rangeMode === 'migration' && migHas);
   };
   const setPointSize = () => {
     recMat.uniforms.size.value = pointPx * dpr;
-    migration.setDpr(dpr);
   };
 
   function setRecords(pts: number[][]) {
@@ -493,7 +473,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
 
   /** Keep the detail layer in step with the camera: drop it when zoomed out, redraw it once a move has settled. */
   function updateDetail(now: number, moved: boolean) {
-    if (!hasRange || rangeMode !== 'heat' || past) return;
+    if (!hasRange || rangeMode !== 'heat' || coarse) return;
     if (moved) {
       lastMoveT = now;
       detailCheck = true;
@@ -544,11 +524,6 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     const moved = !lastCam.equals(camera.matrixWorld);
     if (moved) lastCam.copy(camera.matrixWorld);
     updateDetail(now, moved);
-    if (migPlaying && migHas && rangeMode === 'migration') {
-      migT = (migT + Math.min(100, now - lastT) / MONTH_MS) % 12;
-      migration.setTime(migT);
-      migCb(migT);
-    }
     for (const cb of frameCbs) cb(moved);
     // the globe turned under a still pointer (auto-rotate, a fly-to): what is under it may have changed
     if (moved && pointer && !hoverQueued && !dragging) {
@@ -613,10 +588,9 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       pointPx = POINT_PX[level];
       setPointSize();
     },
-    showRange(cells, points) {
+    showRange(cells, points, opts) {
+      coarse = !!opts?.coarse;
       hasRange = cells.length > 0 || points.length > 0;
-      curCells = cells;
-      past = false;
       if (cells.length) heat.show(cells);
       setRecords(points);
       // a new animal: whatever detail was drawn belongs to the last one
@@ -626,35 +600,11 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       detailCheck = true;
       applyMode();
     },
-    setPast(cells) {
-      past = !!cells;
-      if (cells) {
-        heat.show(cells);
-        detailOn = false;
-      } else if (curCells.length) heat.show(curCells);
-      applyMode();
-      detailCheck = true;
-    },
     clearRange() {
       hasRange = false;
-      past = false;
       heat.hide();
       applyMode();
     },
-    showMigration(months, seed, routes) {
-      migHas = !!months;
-      migration.show(months, seed, routes);
-      if (months) migration.setTime(migT);
-      applyMode();
-    },
-    setMigrationTime(t) {
-      migT = Math.min(11.999, Math.max(0, t));
-      if (migHas) migration.setTime(migT);
-    },
-    setMigrationPlaying(on) {
-      migPlaying = on;
-    },
-    onMigrationTime: (cb) => (migCb = cb),
     setRangeMode(mode) {
       rangeMode = mode;
       detailCheck = true;
