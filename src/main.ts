@@ -8,6 +8,7 @@ import { createStage } from './stage';
 import { createSearch, type Filters, type Why } from './search';
 import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
+import type { Place } from './migration';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
 import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
@@ -99,15 +100,33 @@ async function boot() {
   let placeEntry: { iso: string; state: string | null } | null = null;
   let statusKeyOpen = false; // the panel explaining the status codes, opened from the Status row
   // how the range is drawn; remembered per browser, heatmap by default
-  let rangeMode: 'heat' | 'points' = 'heat';
+  let rangeMode: 'heat' | 'points' | 'migration' = 'heat';
+  let plainMode: 'heat' | 'points' = 'heat'; // the last of the two always-available views, for animals that do not migrate
+  let wantMigration = false; // migration was the last view picked, so animals that migrate open on it
+  let seasons: Place[][] | null = null; // the open animal's month-by-month places, if it moves with the seasons
+  let monthT = 0;
+  let migPlaying = true;
   let shownPoints = 0;
   try {
     const saved = localStorage.getItem('arf.rangeMode');
-    if (saved === 'points' || saved === 'dots') rangeMode = 'points'; // "dots" was the old name
+    if (saved === 'points' || saved === 'dots') rangeMode = plainMode = 'points'; // "dots" was the old name
+    if (saved === 'migration') wantMigration = true;
   } catch {
     // storage blocked: keep the default
   }
   stage.setRangeMode(rangeMode);
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  stage.onMigrationTime((t) => {
+    monthT = t;
+    syncMonth();
+  });
+  /** keeps the month label and slider in step with the animation without redrawing the plate */
+  function syncMonth() {
+    const lab = plate.querySelector<HTMLElement>('[data-month]');
+    if (lab) lab.textContent = MONTHS[Math.min(11, Math.floor(monthT))];
+    const sl = plate.querySelector<HTMLInputElement>('input[data-month-slider]');
+    if (sl && document.activeElement !== sl) sl.value = String(Math.round(monthT * 100));
+  }
   // Where the camera was before we moved it, one for each layer Back can undo.
   let animalHome: Pov | null = null;
   let filterHome: Pov | null = null;
@@ -373,6 +392,36 @@ async function boot() {
     return pts;
   }
 
+  const seasonCache = new Map<number, Place[][] | null>();
+  /** Month-by-month places, for animals whose records move with the seasons (scripts/build-seasons.ts); null for the rest. */
+  async function loadSeasons(s: Species): Promise<Place[][] | null> {
+    if (seasonCache.has(s.id)) return seasonCache.get(s.id)!;
+    const data = await fetch(`${BASE}data/seasons/${s.id}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null); // a host that answers a missing file with a page fails to parse: no data either way
+    // drop the faint places (a stray record far from the rest reads as a long arc to nowhere) and make each month add up to 1 again
+    const months: Place[][] | null =
+      Array.isArray(data?.months) && data.months.length === 12
+        ? (data.months as Place[][]).map((m) => {
+            const keep = m.filter((p) => p[2] >= 0.04);
+            const sum = keep.reduce((t, p) => t + p[2], 0);
+            return sum ? keep.map((p) => [p[0], p[1], p[2] / sum] as Place) : m;
+          })
+        : null;
+    seasonCache.set(s.id, months);
+    return months;
+  }
+
+  /** The view for the open animal: migration when it has seasons and that was the last pick, else the last plain view. */
+  function chooseMode() {
+    const next = seasons && wantMigration ? 'migration' : rangeMode === 'migration' ? plainMode : rangeMode;
+    const changed = next !== rangeMode;
+    rangeMode = next;
+    stage.setRangeMode(rangeMode);
+    stage.setMigrationPlaying(rangeMode === 'migration' && migPlaying);
+    return changed;
+  }
+
   async function loadRange(s: Species): Promise<Cell[]> {
     const hit = cache.get(s.id);
     if (hit) return hit;
@@ -396,6 +445,9 @@ async function boot() {
     stage.stopAutoRotate();
     selected = s;
     shownPoints = 0;
+    seasons = null;
+    stage.showMigration(null);
+    chooseMode();
     activeCountry = keep?.iso ?? null;
     activeState = keep?.state ?? null;
     const idx = list.findIndex((x) => x.id === s.id);
@@ -409,11 +461,18 @@ async function boot() {
     document.body.classList.add('has-plate');
     stage.shiftTo(...offset(true), 700);
 
-    const [cells, pts] = await Promise.all([loadRange(s), loadPoints(s)]);
+    const [cells, pts, months] = await Promise.all([loadRange(s), loadPoints(s), loadSeasons(s)]);
     if (selected?.id !== s.id) return;
     stage.showRange(cells, pts);
     shownPoints = pts.length;
-    if (rangeMode === 'points') renderPlate(); // the legend counts the points
+    seasons = months;
+    if (months) {
+      monthT = 0;
+      stage.setMigrationTime(0);
+      stage.showMigration(months, s.id);
+    }
+    chooseMode();
+    if (months || rangeMode === 'points') renderPlate(); // the legend counts the points; migration adds its own view
     animalPov = rangePov(cells);
     if (!keep && !opts.stay && !atPin) flyTwoStage(animalPov);
   }
@@ -439,6 +498,9 @@ async function boot() {
     placeEntry = null;
     animalPov = null;
     stage.clearRange();
+    seasons = null;
+    stage.showMigration(null);
+    stage.setMigrationPlaying(false);
     stage.setRangeCountries([], null);
     syncOpenCountry();
     pins.innerHTML = '';
@@ -729,20 +791,32 @@ async function boot() {
         <button class="share" type="button" data-action="share">Share</button>
         <span class="modes" role="group" aria-label="Show the range as">
           <button type="button" data-mode="heat" aria-pressed="${rangeMode === 'heat'}">Heatmap</button>
-          <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>
+          <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>${
+            seasons ? `\n          <button type="button" data-mode="migration" aria-pressed="${rangeMode === 'migration'}">Migration</button>` : ''
+          }
         </span>
       </div>
       <p class="map-caveat">${
         rangeMode === 'heat'
           ? 'The shading shows where people have recorded this animal, not an expert range map.'
-          : 'Each dot is a record people logged on GBIF, not an expert range map.'
-      }</p>
+          : rangeMode === 'migration'
+            ? 'The dots follow where people recorded this animal each month. They are not tracked animals.'
+            : 'Each dot is a record people logged on GBIF, not an expert range map.'
+      }</p>${
+        rangeMode === 'migration'
+          ? `
+      <div class="season">
+        <button type="button" class="season-play" data-action="season-play" aria-label="${migPlaying ? 'Pause' : 'Play'}">${migPlaying ? '❚❚' : '▶'}</button>
+        <span class="season-month" data-month aria-live="off">${MONTHS[Math.min(11, Math.floor(monthT))]}</span>
+        <input type="range" min="0" max="1199" step="1" value="${Math.round(monthT * 100)}" data-month-slider aria-label="Month of the year" />
+      </div>`
+          : ''
+      }
       <p class="plate-no">No. ${s.no} · ${esc(s.group)} · ${esc(s.family)}</p>
       <div class="plate-head${s.img && wide ? ' is-wide' : ''}">
         ${photo}
         <div class="titles">
           <h2>${esc(s.name)}</h2>
-          <p class="sci">${esc(s.sci)}</p>
           <p class="status">${scale(s.status)}<span>${STATUS_LABEL[s.status] ?? s.status}</span>${
             STATUS_NOTE[s.status]
               ? `<details class="more status-more"><summary>What this means</summary><span class="status-note">${STATUS_NOTE[s.status]}${s.countries.some((x) => x.introduced) ? ' The rating is for its native range.' : ''}</span></details>`
@@ -772,7 +846,9 @@ async function boot() {
         <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF</dd></div>
         <div><dt>Map</dt><dd>
           ${
-            rangeMode === 'heat'
+            rangeMode === 'migration'
+              ? `<details class="more"><summary>About this animation</summary><p class="note">Each month, GBIF records for this animal are grouped into the main places they come from, and the dots drift from one month's places to the next along the arcs. Dots are not individual animals and the arcs are not measured routes. It also follows where people look, so a place can look empty only because few observers are there that month.</p></details>`
+              : rangeMode === 'heat'
               ? `<span class="legend" aria-hidden="true">${HEAT_BANDS.slice(1)
                   .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
                   .join('')}</span>
@@ -851,6 +927,23 @@ async function boot() {
     }, 1800);
   }
 
+  plate.addEventListener('input', (e) => {
+    const sl = e.target as HTMLInputElement;
+    if (!sl.matches?.('input[data-month-slider]')) return;
+    // dragging the slider takes over from the animation
+    migPlaying = false;
+    stage.setMigrationPlaying(false);
+    monthT = Number(sl.value) / 100;
+    stage.setMigrationTime(monthT);
+    const lab = plate.querySelector<HTMLElement>('[data-month]');
+    if (lab) lab.textContent = MONTHS[Math.min(11, Math.floor(monthT))];
+    const pb = plate.querySelector<HTMLElement>('[data-action="season-play"]');
+    if (pb) {
+      pb.textContent = '▶';
+      pb.setAttribute('aria-label', 'Play');
+    }
+  });
+
   plate.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('#back')) return void back();
@@ -860,15 +953,29 @@ async function boot() {
     if (sh) return void share(sh);
     const mb = t.closest<HTMLElement>('button[data-mode]');
     if (mb) {
-      rangeMode = mb.dataset.mode === 'points' ? 'points' : 'heat';
+      const picked = mb.dataset.mode;
+      wantMigration = picked === 'migration' && !!seasons;
+      if (picked === 'points' || picked === 'heat') plainMode = picked;
+      rangeMode = wantMigration ? 'migration' : plainMode;
       try {
-        localStorage.setItem('arf.rangeMode', rangeMode);
+        localStorage.setItem('arf.rangeMode', wantMigration ? 'migration' : plainMode);
       } catch {
         // storage blocked: the choice just won't be remembered
       }
       stage.setRangeMode(rangeMode);
+      if (rangeMode === 'migration') {
+        migPlaying = true;
+      }
+      stage.setMigrationPlaying(rangeMode === 'migration' && migPlaying);
       renderPlate();
       plate.querySelector<HTMLElement>(`button[data-mode="${rangeMode}"]`)?.focus();
+      return;
+    }
+    if (t.closest('[data-action="season-play"]')) {
+      migPlaying = !migPlaying;
+      stage.setMigrationPlaying(migPlaying);
+      renderPlate();
+      plate.querySelector<HTMLElement>('[data-action="season-play"]')?.focus();
       return;
     }
     const sb = t.closest<HTMLElement>('button[data-state]');
