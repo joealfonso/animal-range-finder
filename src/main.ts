@@ -8,10 +8,9 @@ import { createStage } from './stage';
 import { createSearch, type Filters, type Why } from './search';
 import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
-import type { Place } from './migration';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
-import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature, type TimeEra } from './types';
+import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
 
 const BASE = import.meta.env.BASE_URL;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -100,33 +99,15 @@ async function boot() {
   let placeEntry: { iso: string; state: string | null } | null = null;
   let statusKeyOpen = false; // the panel explaining the status codes, opened from the Status row
   // how the range is drawn; remembered per browser, heatmap by default
-  let rangeMode: 'heat' | 'points' | 'migration' = 'heat';
-  let plainMode: 'heat' | 'points' = 'heat'; // the last of the two always-available views, for animals that do not migrate
-  let wantMigration = false; // migration was the last view picked, so animals that migrate open on it
-  let seasons: Place[][] | null = null; // the open animal's month-by-month places, if it moves with the seasons
-  let monthT = 0;
-  let migPlaying = true;
+  let rangeMode: 'heat' | 'points' = 'heat';
   let shownPoints = 0;
   try {
     const saved = localStorage.getItem('arf.rangeMode');
-    if (saved === 'points' || saved === 'dots') rangeMode = plainMode = 'points'; // "dots" was the old name
-    if (saved === 'migration') wantMigration = true;
+    if (saved === 'points' || saved === 'dots') rangeMode = 'points'; // "dots" was the old name
   } catch {
     // storage blocked: keep the default
   }
   stage.setRangeMode(rangeMode);
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  stage.onMigrationTime((t) => {
-    monthT = t;
-    syncMonth();
-  });
-  /** keeps the month label and slider in step with the animation without redrawing the plate */
-  function syncMonth() {
-    const lab = plate.querySelector<HTMLElement>('[data-month]');
-    if (lab) lab.textContent = MONTHS[Math.min(11, Math.floor(monthT))];
-    const sl = plate.querySelector<HTMLInputElement>('input[data-month-slider]');
-    if (sl && document.activeElement !== sl) sl.value = String(Math.round(monthT * 100));
-  }
   // Where the camera was before we moved it, one for each layer Back can undo.
   let animalHome: Pov | null = null;
   let filterHome: Pov | null = null;
@@ -136,7 +117,7 @@ async function boot() {
   let frameDirty = true;
   let blockersDirty = true; // the text panels around the globe moved or changed size
   let cache = new Map<number, Cell[]>();
-  // "What lives here": a point (a dropped pin, or where the visitor is) and the animals with a sampled record near it.
+  // "What lives here": a point (a dropped pin, or where the visitor is) and the animals recorded near it.
   // hits is null while the distances are being measured. The point stays in the page: it is never put in the URL or sent.
   // continent: the pin's, to spot animals recorded far from where they live (null out at sea)
   let near: {
@@ -217,17 +198,17 @@ async function boot() {
     return !!near?.continent && !s.continents.includes(near.continent);
   }
 
-  /** Why the list is empty. A place with no animals is a gap in the sampled records, not a search the user got wrong. */
+  /** Why the list is empty. A place with no animals is a gap in the records, not a search the user got wrong. */
   function emptyMessage() {
     if (near) {
       if (!near.hits) return 'Measuring how far each animal’s nearest wild record is…';
       if (!near.hits.size)
-        return `No animal in the catalogue has a sampled wild record within ${NEAR_KM} km of ${near.you ? 'you' : 'this pin'}. Out at sea, or somewhere few people record wildlife, that is expected. Drop the pin somewhere else, or clear it with ✕ below.`;
+        return `No animal in the catalogue has a wild record within ${NEAR_KM} km of ${near.you ? 'you' : 'this pin'}. Out at sea, or somewhere few people record wildlife, that is expected. Drop the pin somewhere else, or clear it with ✕ below.`;
       return 'None of the animals near here match that. Try fewer filters.';
     }
     const placeOnly = run('', { continent: null, status: null, country: filters.country, state: filters.state });
     if (filters.state && !placeOnly.length)
-      return `No sampled records place an animal in ${stateName(filters.state)}. States come from a sample of each animal's records, so smaller ones are often empty. Pick another state, or clear it with ✕ below.`;
+      return `No animal's records place it in ${stateName(filters.state)}. A state is listed for an animal only when it holds a fair share of its records, so smaller ones are often empty. Pick another state, or clear it with ✕ below.`;
     if (filters.country && !placeOnly.length)
       return `No animal in the catalogue has enough records in ${isoName(filters.country)} to list it there. Pick another country, or clear it with ✕ below.`;
     return 'Nothing in the catalogue matches that. Try a Latin name, a country, or fewer filters.';
@@ -392,79 +373,6 @@ async function boot() {
     return pts;
   }
 
-  // ---------- time travel: the range through an earlier year ----------
-  const timeCache = new Map<number, TimeEra[] | null>();
-  let timeEras: TimeEra[] | null = null; // the open animal's, once loaded; null when it has none
-  let when = 0; // how many eras the slider is back from today (0 = today)
-  async function loadTime(s: Species): Promise<TimeEra[] | null> {
-    if (timeCache.has(s.id)) return timeCache.get(s.id)!;
-    const eras: TimeEra[] | null = await fetch(`${BASE}data/time/${s.id}.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => (Array.isArray(j?.eras) ? (j.eras as TimeEra[]).filter((e, i, a) => e.n > 0 || a.slice(0, i).some((x) => x.n > 0)) : null))
-      .catch(() => null); // not every animal has one; a static host may answer 200 with a page, hence the shape check
-    timeCache.set(s.id, eras);
-    return eras;
-  }
-  /** Cells for everything logged through era `upto` (inclusive), shaded against the densest cell at that point. */
-  function pastCells(eras: TimeEra[], upto: number): Cell[] {
-    const sum = new Map<string, number>();
-    for (const e of eras.slice(0, upto + 1))
-      for (const [la, lo, v] of e.cells) sum.set(`${la},${lo}`, (sum.get(`${la},${lo}`) ?? 0) + v);
-    let max = 0;
-    for (const v of sum.values()) max = Math.max(max, v);
-    if (!max) return [];
-    return [...sum.entries()].map(([k, v]) => {
-      const [la, lo] = k.split(',').map(Number);
-      return [la, lo, Math.sqrt(v / max)] as Cell;
-    });
-  }
-  /** The year the slider stop `back` eras before today stands for, and how many records had been logged by then. */
-  function timeStop(eras: TimeEra[], back: number) {
-    const e = eras[eras.length - back];
-    return { year: e.to, records: eras.slice(0, eras.length - back + 1).reduce((a, x) => a + x.n, 0) };
-  }
-  function setWhen(back: number) {
-    when = back;
-    stage.setPast(timeEras && back > 0 ? pastCells(timeEras, timeEras.length - back) : null);
-    const out = plate.querySelector<HTMLElement>('[data-time-out]');
-    if (out && timeEras) out.innerHTML = timeLabel(timeEras, back);
-  }
-  function timeLabel(eras: TimeEra[], back: number): string {
-    if (back === 0) return `<b>Today</b> · all ${nf.format(selected?.occurrences ?? 0)} records`;
-    const t = timeStop(eras, back);
-    return `<b>Through ${t.year}</b> · ${nf.format(t.records)} record${t.records === 1 ? '' : 's'}`;
-  }
-
-  const seasonCache = new Map<number, Place[][] | null>();
-  /** Month-by-month places, for animals whose records move with the seasons (scripts/build-seasons.ts); null for the rest. */
-  async function loadSeasons(s: Species): Promise<Place[][] | null> {
-    if (seasonCache.has(s.id)) return seasonCache.get(s.id)!;
-    const data = await fetch(`${BASE}data/seasons/${s.id}.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null); // a host that answers a missing file with a page fails to parse: no data either way
-    // drop the faint places (a stray record far from the rest reads as a long arc to nowhere) and make each month add up to 1 again
-    const months: Place[][] | null =
-      Array.isArray(data?.months) && data.months.length === 12
-        ? (data.months as Place[][]).map((m) => {
-            const keep = m.filter((p) => p[2] >= 0.04);
-            const sum = keep.reduce((t, p) => t + p[2], 0);
-            return sum ? keep.map((p) => [p[0], p[1], p[2] / sum] as Place) : m;
-          })
-        : null;
-    seasonCache.set(s.id, months);
-    return months;
-  }
-
-  /** The view for the open animal: migration when it has seasons and that was the last pick, else the last plain view. */
-  function chooseMode() {
-    const next = seasons && wantMigration ? 'migration' : rangeMode === 'migration' ? plainMode : rangeMode;
-    const changed = next !== rangeMode;
-    rangeMode = next;
-    stage.setRangeMode(rangeMode);
-    stage.setMigrationPlaying(rangeMode === 'migration' && migPlaying);
-    return changed;
-  }
-
   async function loadRange(s: Species): Promise<Cell[]> {
     const hit = cache.get(s.id);
     if (hit) return hit;
@@ -488,11 +396,6 @@ async function boot() {
     stage.stopAutoRotate();
     selected = s;
     shownPoints = 0;
-    timeEras = null;
-    when = 0;
-    seasons = null;
-    stage.showMigration(null);
-    chooseMode();
     activeCountry = keep?.iso ?? null;
     activeState = keep?.state ?? null;
     const idx = list.findIndex((x) => x.id === s.id);
@@ -506,23 +409,11 @@ async function boot() {
     document.body.classList.add('has-plate');
     stage.shiftTo(...offset(true), 700);
 
-    const [cells, pts, months] = await Promise.all([loadRange(s), loadPoints(s), loadSeasons(s)]);
+    const [cells, pts] = await Promise.all([loadRange(s), loadPoints(s)]);
     if (selected?.id !== s.id) return;
-    stage.showRange(cells, pts);
+    stage.showRange(cells, pts, { coarse: !!s.binned });
     shownPoints = pts.length;
-    loadTime(s).then((eras) => {
-      if (selected?.id !== s.id || !eras) return;
-      timeEras = eras;
-      renderPlate();
-    });
-    seasons = months;
-    if (months) {
-      monthT = 0;
-      stage.setMigrationTime(0);
-      stage.showMigration(months, s.id);
-    }
-    chooseMode();
-    if (months || rangeMode === 'points') renderPlate(); // the legend counts the points; migration adds its own view
+    if (rangeMode === 'points') renderPlate(); // the legend counts the points
     animalPov = rangePov(cells);
     if (!keep && !opts.stay && !atPin) flyTwoStage(animalPov);
   }
@@ -548,9 +439,6 @@ async function boot() {
     placeEntry = null;
     animalPov = null;
     stage.clearRange();
-    seasons = null;
-    stage.showMigration(null);
-    stage.setMigrationPlaying(false);
     stage.setRangeCountries([], null);
     syncOpenCountry();
     pins.innerHTML = '';
@@ -818,15 +706,15 @@ async function boot() {
                 `<li><button type="button" data-state="${esc(x.id)}" aria-pressed="${x.id === activeState}">${esc(x.name)}</button></li>`,
             )
             .join('')}${inCountry.length > SHOW ? `<li class="more">and ${inCountry.length - SHOW} more</li>` : ''}</ul>`
-        : `<p class="note">No sampled records place it in a particular state of ${esc(isoName(activeCountry))}.</p>`
+        : `<p class="note">No state of ${esc(isoName(activeCountry))} holds enough of its records to be listed.</p>`
       : '';
     // where Esc goes from here: back to the list you came from, or one level out
     const atEntry = !!placeEntry && placeEntry.iso === activeCountry && placeEntry.state === activeState;
     const escHint = atEntry ? 'Esc closes it and keeps you here.' : `Esc pulls back to ${esc(isoName(activeCountry ?? ''))}.`;
     const note = activeState
       ? stateHit
-        ? `${Math.round(stateHit.share * 1000) / 10}% of the sampled ${lower} records are from ${esc(stateHit.name)}. ${escHint}`
-        : `None of the sampled ${lower} records are from ${esc(stateName(activeState))}. ${escHint}`
+        ? `${Math.round(stateHit.share * 1000) / 10}% of ${lower} records are from ${esc(stateHit.name)}. ${escHint}`
+        : `Too few ${lower} records are from ${esc(stateName(activeState))} to list it. ${escHint}`
       : active
         ? `${Math.round(active.share * 100)}% of ${lower} records are from ${esc(isoName(active.iso))}. Pick a state below or on the globe${atEntry ? '; Esc closes it and keeps you here.' : ', or press Esc to pull back.'}`
         : activeCountry
@@ -841,28 +729,14 @@ async function boot() {
         <button class="share" type="button" data-action="share">Share</button>
         <span class="modes" role="group" aria-label="Show the range as">
           <button type="button" data-mode="heat" aria-pressed="${rangeMode === 'heat'}">Heatmap</button>
-          <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>${
-            seasons ? `\n          <button type="button" data-mode="migration" aria-pressed="${rangeMode === 'migration'}">Migration</button>` : ''
-          }
+          <button type="button" data-mode="points" aria-pressed="${rangeMode === 'points'}">Points</button>
         </span>
       </div>
-      ${timeSlider()}
       <p class="map-caveat">${
         rangeMode === 'heat'
           ? 'The shading shows where people have recorded this animal, not an expert range map.'
-          : rangeMode === 'migration'
-            ? 'The dots follow where people recorded this animal each month. They are not tracked animals.'
-            : 'Each dot is a record people logged on GBIF, not an expert range map.'
-      }</p>${
-        rangeMode === 'migration'
-          ? `
-      <div class="season">
-        <button type="button" class="season-play" data-action="season-play" aria-label="${migPlaying ? 'Pause' : 'Play'}">${migPlaying ? '❚❚' : '▶'}</button>
-        <span class="season-month" data-month aria-live="off">${MONTHS[Math.min(11, Math.floor(monthT))]}</span>
-        <input type="range" min="0" max="1199" step="1" value="${Math.round(monthT * 100)}" data-month-slider aria-label="Month of the year" />
-      </div>`
-          : ''
-      }
+          : 'Each dot is a place where people logged this animal on GBIF, not an expert range map.'
+      }</p>
       <p class="plate-no">No. ${s.no} · ${esc(s.group)} · ${esc(s.family)}</p>
       <div class="plate-head${s.img && wide ? ' is-wide' : ''}">
         ${photo}
@@ -897,24 +771,26 @@ async function boot() {
         <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF</dd></div>
         <div><dt>Map</dt><dd>
           ${
-            rangeMode === 'migration'
-              ? `<details class="more"><summary>About this animation</summary><p class="note">Each month, GBIF records for this animal are grouped into the main places they come from, and the dots drift from one month's places to the next along the arcs. Dots are not individual animals and the arcs are not measured routes. It also follows where people look, so a place can look empty only because few observers are there that month.</p></details>`
-              : rangeMode === 'heat'
+            rangeMode === 'heat'
               ? `<span class="legend" aria-hidden="true">${HEAT_BANDS.slice(1)
                   .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
                   .join('')}</span>
                  <span class="legend-ends" aria-hidden="true"><span>fewer records</span><span>more</span></span>
-                 <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest. Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the individual records, with the shading relative to what is in view. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
-              : `<p class="legend-point"><i aria-hidden="true"></i>One wild record${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
-                 <details class="more"><summary>About these points</summary><p class="note">Each point is a record from the GBIF sample, rounded to ${
-                   s.pointsRounding === 0.1
-                     ? 'about 11 km, because this animal is threatened and exact locations can help poachers'
-                     : 'about 1 km'
-                 }. Repeat sightings at the same spot show as one point.</p></details>`
+                 <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest, counted from every GBIF record of this animal. Each darker step holds many times more records than the one before, so faint areas are real but thin. ${s.binned ? 'It is smoothed over about 2°.' : 'Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the places in view, with the shading relative to what is in view.'} It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
+              : `<p class="legend-point"><i aria-hidden="true"></i>${s.binned ? 'A square with records' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
+                 <details class="more"><summary>About these points</summary><p class="note">${
+                   s.binned
+                     ? 'Each point is a square about 75 km across that holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area and each square is marked once.'
+                     : `Each point is a place where a wild record was logged, rounded to ${
+                         s.pointsRounding === 0.1
+                           ? 'about 11 km, because this animal is threatened or poached and exact locations can help poachers'
+                           : 'about 1 km'
+                       }. Repeat sightings at the same spot show as one point.`
+                 }</p></details>`
           }
         </dd></div>
       </dl>
-      <details class="more prov"><summary>Data sources and caveats</summary><p>Where it lives is drawn from GBIF occurrence records (a sample of ${nf.format(s.sampled)}, grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
+      <details class="more prov"><summary>Data sources and caveats</summary><p>Where it lives is drawn from all ${nf.format(s.occurrences)} of its GBIF occurrence records with a location (grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
         .map((d) => (d.doi ? `<a href="https://doi.org/${esc(d.doi.replace(/^doi:/, ''))}" target="_blank" rel="noopener">${esc(d.title)}</a>` : esc(d.title)))
         .join('; ')}. Conservation category: IUCN Red List via GBIF. ${
         s.wiki ? `Text: ${extLink(s.wiki, 'Wikipedia')}, CC BY-SA 4.0.` : ''
@@ -922,19 +798,6 @@ async function boot() {
     plate.hidden = false;
     if (focusedIso) plate.querySelector<HTMLElement>(`button[data-iso="${focusedIso}"]`)?.focus();
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();
-  }
-
-  /** The slider that winds the heatmap back through the years; absent for animals with too few early records. */
-  function timeSlider(): string {
-    if (!timeEras || rangeMode !== 'heat') return '';
-    const n = timeEras.length;
-    return `<div class="time">
-        <label for="time-range">Wind back the years</label>
-        <input id="time-range" type="range" min="0" max="${n}" step="1" value="${n - when}" data-time aria-describedby="time-note" />
-        <div class="time-ticks" aria-hidden="true">${timeEras.map((e) => `<span>${e.to}</span>`).join('')}<span>now</span></div>
-        <p class="time-out" data-time-out aria-live="polite">${timeLabel(timeEras, when)}</p>
-        <details class="more" id="time-note"><summary>Read this before comparing years</summary><p class="note">Each step shows every place the animal was recorded up to that year. Far fewer records were logged in the past, so the shading grows partly because more people started looking, not only because the animal spread. For animals people carried to new places, though, the new places appearing is real.</p></details>
-      </div>`;
   }
 
   /** A play button for the animal's call, credited like the photo. */
@@ -950,20 +813,24 @@ async function boot() {
       </div>`;
   }
 
-  /** With a pin down: how close this animal's nearest sampled record is to it. */
+  /** With a pin down: how close this animal's nearest recorded place is to it. */
   function nearFact(s: Species) {
     const hit = near?.hits?.get(s.id);
     if (!near || !hit) return '';
     const where = near.you ? 'you' : 'your pin';
-    return `<div class="near-fact"><dt>Near</dt><dd><strong>${fmtKm(hit.km)}</strong> from ${where} to its nearest sampled wild record${
-      hit.close ? `, with ${plural(hit.close, 'record', 'records')} within ${CLOSE_KM} km` : ''
+    return `<div class="near-fact"><dt>Near</dt><dd><strong>${fmtKm(hit.km)}</strong> from ${where} to its nearest recorded place${
+      hit.close ? `, with ${plural(hit.close, 'recorded place', 'recorded places')} within ${CLOSE_KM} km` : ''
     }.<p class="note">${
       offRange(s)
-        ? `Few of its sampled records come from ${esc(near.continent!)}. Records like these are often zoo, park or escaped animals that GBIF doesn’t flag, or a part of its range that people rarely record. `
+        ? `Few of its records come from ${esc(near.continent!)}. Records like these are often zoo, park or escaped animals that GBIF doesn’t flag, or a part of its range that people rarely record. `
         : ''
     }${
-      s.pointsRounding === 0.1 ? 'Records of this threatened animal are rounded to about 11 km, so the distance is too. ' : ''
-    }A sample of records, not every sighting: it could well be closer.</p></dd></div>`;
+      s.binned
+        ? 'This animal is drawn as squares about 75 km across, so the distance is only good to about that. '
+        : s.pointsRounding === 0.1
+          ? 'Places of this threatened or poached animal are rounded to about 11 km, so the distance is too. '
+          : ''
+    }Only places where someone logged it, not every sighting: it could well be closer.</p></dd></div>`;
   }
 
   /** Share the open animal's page (/animal/<name>/): it has its own title, photo and description for link previews, and opens the globe. */
@@ -991,24 +858,6 @@ async function boot() {
     }, 1800);
   }
 
-  plate.addEventListener('input', (e) => {
-    const sl = e.target as HTMLInputElement;
-    if (sl.matches?.('input[data-time]') && timeEras) return void setWhen(timeEras.length - Number(sl.value));
-    if (!sl.matches?.('input[data-month-slider]')) return;
-    // dragging the slider takes over from the animation
-    migPlaying = false;
-    stage.setMigrationPlaying(false);
-    monthT = Number(sl.value) / 100;
-    stage.setMigrationTime(monthT);
-    const lab = plate.querySelector<HTMLElement>('[data-month]');
-    if (lab) lab.textContent = MONTHS[Math.min(11, Math.floor(monthT))];
-    const pb = plate.querySelector<HTMLElement>('[data-action="season-play"]');
-    if (pb) {
-      pb.textContent = '▶';
-      pb.setAttribute('aria-label', 'Play');
-    }
-  });
-
   plate.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('#back')) return void back();
@@ -1018,29 +867,15 @@ async function boot() {
     if (sh) return void share(sh);
     const mb = t.closest<HTMLElement>('button[data-mode]');
     if (mb) {
-      const picked = mb.dataset.mode;
-      wantMigration = picked === 'migration' && !!seasons;
-      if (picked === 'points' || picked === 'heat') plainMode = picked;
-      rangeMode = wantMigration ? 'migration' : plainMode;
+      rangeMode = mb.dataset.mode === 'points' ? 'points' : 'heat';
       try {
-        localStorage.setItem('arf.rangeMode', wantMigration ? 'migration' : plainMode);
+        localStorage.setItem('arf.rangeMode', rangeMode);
       } catch {
         // storage blocked: the choice just won't be remembered
       }
       stage.setRangeMode(rangeMode);
-      if (rangeMode === 'migration') {
-        migPlaying = true;
-      }
-      stage.setMigrationPlaying(rangeMode === 'migration' && migPlaying);
       renderPlate();
       plate.querySelector<HTMLElement>(`button[data-mode="${rangeMode}"]`)?.focus();
-      return;
-    }
-    if (t.closest('[data-action="season-play"]')) {
-      migPlaying = !migPlaying;
-      stage.setMigrationPlaying(migPlaying);
-      renderPlate();
-      plate.querySelector<HTMLElement>('[data-action="season-play"]')?.focus();
       return;
     }
     const sb = t.closest<HTMLElement>('button[data-state]');

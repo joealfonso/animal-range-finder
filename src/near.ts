@@ -1,18 +1,18 @@
 import type { Species } from './types';
 
-// "What lives here": which animals have a sampled wild record near a point, and how near the closest one is.
+// "What lives here": which animals have a wild record near a point, and how near the closest recorded place is.
 // near.json (built by scripts/build-near.ts) says which animals have records in each 1° cell, so only those animals'
 // point files are fetched and measured. Everything runs in the browser; the point never leaves the page.
 
 /** How far from the pin a record still counts, in km. */
 export const NEAR_KM = 300;
-/** Records within this distance are counted for the "N records within" line, in km. */
+/** Recorded places within this distance are counted for the "N recorded places within" line, in km. */
 export const CLOSE_KM = 50;
 
 export interface NearHit {
-  /** distance to the nearest sampled record, km */
+  /** distance to the nearest recorded place, km */
   km: number;
-  /** sampled records within CLOSE_KM */
+  /** recorded places within CLOSE_KM */
   close: number;
 }
 
@@ -57,7 +57,7 @@ export function createNear(base: string, byId: Map<number, Species>, loadPoints:
     return [...out].map((id) => byId.get(id)).filter((s): s is Species => !!s);
   }
 
-  /** Every animal with a sampled record within NEAR_KM of the point, keyed by id. */
+  /** Every animal with a recorded place within NEAR_KM of the point, keyed by id. */
   return async function near(lat: number, lng: number): Promise<Map<number, NearHit>> {
     const ix = await loadIndex();
     const list = candidates(ix, lat, lng);

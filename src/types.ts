@@ -24,13 +24,14 @@ export interface Species {
   countries: { iso: string; share: number; introduced?: boolean }[];
   continents: string[];
   occurrences: number;
-  /** rounding applied to published record points, in degrees (0.1 for threatened animals) */
+  /** size of a published point, in degrees: 0.01 (about 1 km) normally, 0.1 for threatened or poached animals, 0.7 for animals counted by area */
   pointsRounding?: number;
   /** records GBIF flags as captive/managed, left out of everything */
   captiveExcluded?: number;
-  sampled: number;
+  /** set when the animal has too many records to list one by one: they are counted per square of this many degrees */
+  binned?: number;
   datasets: { title: string; doi: string | null; license: string }[];
-  /** states/provinces the sampled records fall in, largest share first */
+  /** states/provinces holding a fair share of the records, largest share first */
   states: StateShare[];
   /** a short recording of its call, for animals with one on Commons (data/sounds.csv) */
   sound?: Sound;
@@ -49,7 +50,7 @@ export interface StateShare {
   id: string;
   name: string;
   iso: string;
-  /** share of the sampled records */
+  /** share of the records */
   share: number;
 }
 
@@ -112,10 +113,3 @@ export const STATUS_NOTE: Record<string, string> = {
   NE: 'Scientists haven’t checked yet how at risk it is, so this doesn’t mean it is safe or in danger.',
   VAR: 'It is a group of related animals, and each kind is rated on its own, from vulnerable to critically endangered.',
 };
-
-/** Records logged up to the end of `to`, as 2° cells whose last number is the records the cell stands for (data/time) */
-export interface TimeEra {
-  to: number;
-  n: number;
-  cells: Cell[];
-}
