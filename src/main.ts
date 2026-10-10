@@ -8,7 +8,7 @@ import { createStage } from './stage';
 import { createSearch, type Filters, type Why } from './search';
 import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
-import type { Place } from './migration';
+import type { Place, Routes } from './migration';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
 import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature, type TimeEra } from './types';
@@ -435,24 +435,20 @@ async function boot() {
     return `<b>Through ${t.year}</b> · ${nf.format(t.records)} record${t.records === 1 ? '' : 's'}`;
   }
 
-  const seasonCache = new Map<number, Place[][] | null>();
-  /** Month-by-month places, for animals whose records move with the seasons (scripts/build-seasons.ts); null for the rest. */
-  async function loadSeasons(s: Species): Promise<Place[][] | null> {
+  interface Seasons {
+    months: Place[][];
+    routes: Routes | null;
+  }
+  const seasonCache = new Map<number, Seasons | null>();
+  /** Month-by-month places and the routes between them, for animals whose records move with the seasons (scripts/build-seasons.ts, build-routes.ts); null for the rest. */
+  async function loadSeasons(s: Species): Promise<Seasons | null> {
     if (seasonCache.has(s.id)) return seasonCache.get(s.id)!;
     const data = await fetch(`${BASE}data/seasons/${s.id}.json`)
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null); // a host that answers a missing file with a page fails to parse: no data either way
-    // drop the faint places (a stray record far from the rest reads as a long arc to nowhere) and make each month add up to 1 again
-    const months: Place[][] | null =
-      Array.isArray(data?.months) && data.months.length === 12
-        ? (data.months as Place[][]).map((m) => {
-            const keep = m.filter((p) => p[2] >= 0.04);
-            const sum = keep.reduce((t, p) => t + p[2], 0);
-            return sum ? keep.map((p) => [p[0], p[1], p[2] / sum] as Place) : m;
-          })
-        : null;
-    seasonCache.set(s.id, months);
-    return months;
+    const seasons: Seasons | null = Array.isArray(data?.months) && data.months.length === 12 ? { months: data.months, routes: data.routes ?? null } : null;
+    seasonCache.set(s.id, seasons);
+    return seasons;
   }
 
   /** The view for the open animal: migration when it has seasons and that was the last pick, else the last plain view. */
@@ -506,7 +502,8 @@ async function boot() {
     document.body.classList.add('has-plate');
     stage.shiftTo(...offset(true), 700);
 
-    const [cells, pts, months] = await Promise.all([loadRange(s), loadPoints(s), loadSeasons(s)]);
+    const [cells, pts, season] = await Promise.all([loadRange(s), loadPoints(s), loadSeasons(s)]);
+    const months = season?.months ?? null;
     if (selected?.id !== s.id) return;
     stage.showRange(cells, pts);
     shownPoints = pts.length;
@@ -519,7 +516,7 @@ async function boot() {
     if (months) {
       monthT = 0;
       stage.setMigrationTime(0);
-      stage.showMigration(months, s.id);
+      stage.showMigration(months, s.id, season?.routes);
     }
     chooseMode();
     if (months || rangeMode === 'points') renderPlate(); // the legend counts the points; migration adds its own view

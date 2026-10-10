@@ -1,24 +1,25 @@
 import * as THREE from 'three';
+import { flowsBetween, hopKey, type Flow, type Place, type Routes } from './flows';
 
-// Seasonal movement for one animal: a flock of dots that follows where people recorded it each month, travelling along
-// thin arcs from one month's places to the next. It is built from GBIF records (scripts/build-seasons.ts), so it shows
-// where the records go, not tracked individuals.
+export type { Place, Routes };
 
-/** lat, lng, share of that month's records */
-export type Place = [number, number, number];
+// Seasonal movement for one animal: a flock of dots that follows where people recorded it each month, travelling from
+// one month's places to the next along routes that stay in the animal's own medium (scripts/build-routes.ts: round the
+// continents for a whale, over land for a bear). It is built from GBIF records (scripts/build-seasons.ts), so it shows
+// where the records go, not tracked individuals, and the routes are a best guess at the way between them.
 
 const DOTS = 260;
 const MOVE = 0.62; // share of a month a dot spends travelling; the rest it stays put
-const ARC_MIN_KM = 500; // shorter hops get no arc
-const ARC_LIFT = 0.07; // arc height at its middle, as a share of the radius, for a hop half way round the world
+const ARC_MIN_KM = 500; // shorter hops draw no line
+const ARC_LIFT = 0.07; // how high a flier's path rises at its middle, as a share of the radius, for a trip half way round the world
 const HOVER = 1.011;
 const rad = Math.PI / 180;
 
-interface Flow {
-  a: number;
-  b: number;
-  w: number;
-  km: number;
+/** A path over the globe: unit vectors with the angle travelled up to each, so a dot can sit at any share of the way. */
+interface Path {
+  xyz: Float32Array;
+  cum: Float32Array;
+  total: number;
 }
 
 const unit = (lat: number, lng: number, out: THREE.Vector3) => {
@@ -29,27 +30,19 @@ const unit = (lat: number, lng: number, out: THREE.Vector3) => {
   return out.set(s * Math.cos(theta), Math.cos(phi), s * Math.sin(theta));
 };
 
-function kmBetween(p: Place, q: Place) {
-  const d = Math.sin(((q[0] - p[0]) * rad) / 2) ** 2 + Math.cos(p[0] * rad) * Math.cos(q[0] * rad) * Math.sin(((q[1] - p[1]) * rad) / 2) ** 2;
-  return 12742 * Math.asin(Math.min(1, Math.sqrt(d)));
-}
-
-/** Where each month's records go next: nearest places first, so a place that stays put stays put. */
-function flowsBetween(from: Place[], to: Place[]): Flow[] {
-  const ra = from.map((p) => p[2]);
-  const rb = to.map((p) => p[2]);
-  const pairs: Flow[] = [];
-  from.forEach((p, a) => to.forEach((q, b) => pairs.push({ a, b, w: 0, km: kmBetween(p, q) })));
-  pairs.sort((x, y) => x.km - y.km);
-  const out: Flow[] = [];
-  for (const f of pairs) {
-    const m = Math.min(ra[f.a], rb[f.b]);
-    if (m <= 1e-6) continue;
-    ra[f.a] -= m;
-    rb[f.b] -= m;
-    out.push({ ...f, w: m });
+function pathOf(points: ArrayLike<ArrayLike<number>>): Path {
+  const n = points.length;
+  const xyz = new Float32Array(n * 3);
+  const cum = new Float32Array(n);
+  const v = new THREE.Vector3();
+  const prev = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    unit(points[i][0], points[i][1], v);
+    xyz.set([v.x, v.y, v.z], i * 3);
+    if (i) cum[i] = cum[i - 1] + Math.acos(Math.min(1, Math.max(-1, v.dot(prev))));
+    prev.copy(v);
   }
-  return out;
+  return { xyz, cum, total: cum[n - 1] };
 }
 
 /** Counts that add up to n, in proportion to the weights. */
@@ -104,7 +97,11 @@ export function createMigration(R: number, dpr: number) {
 
   // ---- per animal
   let months: Place[][] = [];
+  let medium: Routes['medium'] = 'air';
+  let spread = 5; // degrees dots scatter around a place
   let flows: Flow[][] = []; // flows[k]: month k to month k+1 (the last wraps to the first)
+  let routes: Record<string, [number, number][]> = {};
+  const paths = new Map<string, Path>(); // one per hop, built the first time it is needed
   let stop: Uint8Array[] = []; // stop[d][k]: the place dot d is at in month k; stop[d][12] is where it started
   let off: Float32Array = new Float32Array(0); // [dot][month] jitter, lat/lng degrees
   let delay: Float32Array = new Float32Array(0); // [dot][transition], 0..1 of the slack in a month
@@ -113,7 +110,7 @@ export function createMigration(R: number, dpr: number) {
 
   // arcs for the current hop: a pool of lines, reused
   const arcs: THREE.Line[] = [];
-  const ARC_STEPS = 40;
+  const ARC_STEPS = 80;
   const arcMat = new THREE.LineBasicMaterial({ color: 0xff7a52, transparent: true, opacity: 0.0, depthWrite: false });
   let arcMonth = -1;
 
@@ -121,17 +118,44 @@ export function createMigration(R: number, dpr: number) {
   const b = new THREE.Vector3();
   const tmp = new THREE.Vector3();
 
-  /** Point u (0..1) along the arc from one place to the next, lifted off the globe in the middle. */
-  function onArc(p: Place, q: Place, u: number, out: THREE.Vector3, ja = 0, jb = 0, jc = 0, jd = 0) {
-    unit(p[0] + ja, p[1] + jb, a);
-    unit(q[0] + jc, q[1] + jd, b);
-    const ang = Math.acos(Math.min(1, Math.max(-1, a.dot(b))));
-    const so = Math.sin(ang);
-    if (so < 1e-4) return out.copy(a).multiplyScalar(R * HOVER);
-    const wa = Math.sin((1 - u) * ang) / so;
-    const wb = Math.sin(u * ang) / so;
-    out.set(a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb).normalize();
-    const lift = HOVER + ARC_LIFT * (ang / Math.PI) * Math.sin(Math.PI * u);
+  const east = new THREE.Vector3();
+  const north = new THREE.Vector3();
+
+  /** The way from a place in one month to a place in the next: its stored route, or a straight run when there is none. */
+  function pathFor(k: number, a: number, b: number): Path {
+    const key = hopKey(k, a, b);
+    let p = paths.get(key);
+    if (!p) {
+      const q = months[(k + 1) % 12][b];
+      p = pathOf(routes[key] ?? [months[k][a], q]);
+      paths.set(key, p);
+    }
+    return p;
+  }
+
+  /** Point u (0..1) along a path, lifted off the globe in the middle for fliers, then moved sideways by (dLat, dLng) degrees. */
+  function onPath(p: Path, u: number, out: THREE.Vector3, dLat = 0, dLng = 0) {
+    const n = p.cum.length;
+    const s = u * p.total;
+    let i = 0;
+    while (i < n - 2 && p.cum[i + 1] < s) i++;
+    const x = p.xyz;
+    a.set(x[i * 3], x[i * 3 + 1], x[i * 3 + 2]);
+    b.set(x[i * 3 + 3], x[i * 3 + 4], x[i * 3 + 5]);
+    const seg = p.cum[i + 1] - p.cum[i];
+    const f = seg > 1e-6 ? Math.min(1, Math.max(0, (s - p.cum[i]) / seg)) : 0;
+    const so = Math.sin(seg);
+    if (so < 1e-4) out.copy(a);
+    else out.set(0, 0, 0).addScaledVector(a, Math.sin((1 - f) * seg) / so).addScaledVector(b, Math.sin(f * seg) / so);
+    out.normalize();
+    if (dLat || dLng) {
+      east.set(out.z, 0, -out.x);
+      if (east.lengthSq() < 1e-8) east.set(1, 0, 0); // at a pole every way is north
+      east.normalize();
+      north.crossVectors(out, east);
+      out.addScaledVector(east, dLng * rad).addScaledVector(north, dLat * rad).normalize();
+    }
+    const lift = medium === 'air' || medium === 'air-land' ? HOVER + ARC_LIFT * (p.total / Math.PI) * Math.sin(Math.PI * u) : HOVER;
     return out.multiplyScalar(R * lift);
   }
 
@@ -151,9 +175,10 @@ export function createMigration(R: number, dpr: number) {
       const f = hops[i];
       line.visible = !!f;
       if (!f) return;
+      const path = pathFor(k, f.a, f.b);
       const attr = line.geometry.getAttribute('position') as THREE.BufferAttribute;
       for (let s = 0; s <= ARC_STEPS; s++) {
-        onArc(months[k][f.a], months[(k + 1) % 12][f.b], s / ARC_STEPS, tmp);
+        onPath(path, s / ARC_STEPS, tmp);
         attr.setXYZ(s, tmp.x, tmp.y, tmp.z);
       }
       attr.needsUpdate = true;
@@ -165,8 +190,12 @@ export function createMigration(R: number, dpr: number) {
   return {
     group,
     /** null clears it */
-    show(data: Place[][] | null, seed = 1) {
+    show(data: Place[][] | null, seed = 1, route?: Routes | null) {
       months = data ?? [];
+      medium = route?.medium ?? 'air';
+      spread = route?.spread ?? 5;
+      routes = route?.hops ?? {};
+      paths.clear();
       group.visible = false;
       if (!data) {
         n = 0;
@@ -203,7 +232,7 @@ export function createMigration(R: number, dpr: number) {
         }
       }
       off = new Float32Array(n * 13 * 2);
-      for (let i = 0; i < off.length; i++) off[i] = (rand() - 0.5) * 5; // scatter within a place, degrees
+      for (let i = 0; i < off.length; i++) off[i] = (rand() - 0.5) * spread; // scatter within a place, degrees
       delay = new Float32Array(n * 12);
       for (let i = 0; i < delay.length; i++) delay[i] = rand();
       for (let i = 0; i < n; i++) {
@@ -226,13 +255,12 @@ export function createMigration(R: number, dpr: number) {
       arcMat.opacity = 0.5 * Math.sin(Math.PI * Math.min(1, f / (MOVE + 0.2))) ** 0.6;
       const slack = 1 - MOVE;
       for (let i = 0; i < n; i++) {
-        const from = months[k][stop[i][k]];
-        const to = months[(k + 1) % 12][stop[i][k + 1]];
+        const path = pathFor(k, stop[i][k], stop[i][k + 1]);
         const o = (i * 13 + k) * 2;
         const o2 = (i * 13 + k + 1) * 2;
         const u = ease(Math.min(1, Math.max(0, (f - delay[i * 12 + k] * slack) / MOVE)));
         // the scatter blends from this place's offset to the next place's offset as the dot travels
-        onArc(from, to, u, tmp, off[o] * (1 - u), off[o + 1] * (1 - u), off[o2] * u, off[o2 + 1] * u);
+        onPath(path, u, tmp, off[o] * (1 - u) + off[o2] * u, off[o + 1] * (1 - u) + off[o2 + 1] * u);
         pos[i * 3] = tmp.x;
         pos[i * 3 + 1] = tmp.y;
         pos[i * 3 + 2] = tmp.z;
