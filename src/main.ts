@@ -11,7 +11,7 @@ import { HEAT_BANDS } from './heat';
 import type { Place } from './migration';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
-import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature } from './types';
+import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type Pov, type Species, type StateFeature, type TimeEra } from './types';
 
 const BASE = import.meta.env.BASE_URL;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -392,6 +392,49 @@ async function boot() {
     return pts;
   }
 
+  // ---------- time travel: the range through an earlier year ----------
+  const timeCache = new Map<number, TimeEra[] | null>();
+  let timeEras: TimeEra[] | null = null; // the open animal's, once loaded; null when it has none
+  let when = 0; // how many eras the slider is back from today (0 = today)
+  async function loadTime(s: Species): Promise<TimeEra[] | null> {
+    if (timeCache.has(s.id)) return timeCache.get(s.id)!;
+    const eras: TimeEra[] | null = await fetch(`${BASE}data/time/${s.id}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => (Array.isArray(j?.eras) ? (j.eras as TimeEra[]).filter((e, i, a) => e.n > 0 || a.slice(0, i).some((x) => x.n > 0)) : null))
+      .catch(() => null); // not every animal has one; a static host may answer 200 with a page, hence the shape check
+    timeCache.set(s.id, eras);
+    return eras;
+  }
+  /** Cells for everything logged through era `upto` (inclusive), shaded against the densest cell at that point. */
+  function pastCells(eras: TimeEra[], upto: number): Cell[] {
+    const sum = new Map<string, number>();
+    for (const e of eras.slice(0, upto + 1))
+      for (const [la, lo, v] of e.cells) sum.set(`${la},${lo}`, (sum.get(`${la},${lo}`) ?? 0) + v);
+    let max = 0;
+    for (const v of sum.values()) max = Math.max(max, v);
+    if (!max) return [];
+    return [...sum.entries()].map(([k, v]) => {
+      const [la, lo] = k.split(',').map(Number);
+      return [la, lo, Math.sqrt(v / max)] as Cell;
+    });
+  }
+  /** The year the slider stop `back` eras before today stands for, and how many records had been logged by then. */
+  function timeStop(eras: TimeEra[], back: number) {
+    const e = eras[eras.length - back];
+    return { year: e.to, records: eras.slice(0, eras.length - back + 1).reduce((a, x) => a + x.n, 0) };
+  }
+  function setWhen(back: number) {
+    when = back;
+    stage.setPast(timeEras && back > 0 ? pastCells(timeEras, timeEras.length - back) : null);
+    const out = plate.querySelector<HTMLElement>('[data-time-out]');
+    if (out && timeEras) out.innerHTML = timeLabel(timeEras, back);
+  }
+  function timeLabel(eras: TimeEra[], back: number): string {
+    if (back === 0) return `<b>Today</b> · all ${nf.format(selected?.occurrences ?? 0)} records`;
+    const t = timeStop(eras, back);
+    return `<b>Through ${t.year}</b> · ${nf.format(t.records)} record${t.records === 1 ? '' : 's'}`;
+  }
+
   const seasonCache = new Map<number, Place[][] | null>();
   /** Month-by-month places, for animals whose records move with the seasons (scripts/build-seasons.ts); null for the rest. */
   async function loadSeasons(s: Species): Promise<Place[][] | null> {
@@ -445,6 +488,8 @@ async function boot() {
     stage.stopAutoRotate();
     selected = s;
     shownPoints = 0;
+    timeEras = null;
+    when = 0;
     seasons = null;
     stage.showMigration(null);
     chooseMode();
@@ -465,6 +510,11 @@ async function boot() {
     if (selected?.id !== s.id) return;
     stage.showRange(cells, pts);
     shownPoints = pts.length;
+    loadTime(s).then((eras) => {
+      if (selected?.id !== s.id || !eras) return;
+      timeEras = eras;
+      renderPlate();
+    });
     seasons = months;
     if (months) {
       monthT = 0;
@@ -796,6 +846,7 @@ async function boot() {
           }
         </span>
       </div>
+      ${timeSlider()}
       <p class="map-caveat">${
         rangeMode === 'heat'
           ? 'The shading shows where people have recorded this animal, not an expert range map.'
@@ -873,6 +924,19 @@ async function boot() {
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();
   }
 
+  /** The slider that winds the heatmap back through the years; absent for animals with too few early records. */
+  function timeSlider(): string {
+    if (!timeEras || rangeMode !== 'heat') return '';
+    const n = timeEras.length;
+    return `<div class="time">
+        <label for="time-range">Wind back the years</label>
+        <input id="time-range" type="range" min="0" max="${n}" step="1" value="${n - when}" data-time aria-describedby="time-note" />
+        <div class="time-ticks" aria-hidden="true">${timeEras.map((e) => `<span>${e.to}</span>`).join('')}<span>now</span></div>
+        <p class="time-out" data-time-out aria-live="polite">${timeLabel(timeEras, when)}</p>
+        <details class="more" id="time-note"><summary>Read this before comparing years</summary><p class="note">Each step shows every place the animal was recorded up to that year. Far fewer records were logged in the past, so the shading grows partly because more people started looking, not only because the animal spread. For animals people carried to new places, though, the new places appearing is real.</p></details>
+      </div>`;
+  }
+
   /** A play button for the animal's call, credited like the photo. */
   function hear(s: Species) {
     const a = s.sound;
@@ -929,6 +993,7 @@ async function boot() {
 
   plate.addEventListener('input', (e) => {
     const sl = e.target as HTMLInputElement;
+    if (sl.matches?.('input[data-time]') && timeEras) return void setWhen(timeEras.length - Number(sl.value));
     if (!sl.matches?.('input[data-month-slider]')) return;
     // dragging the slider takes over from the animation
     migPlaying = false;

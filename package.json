@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build && tsx scripts/build-seo.ts",
     "preview": "vite preview",
     "data": "tsx scripts/build-data.ts && tsx scripts/build-introduced.ts && tsx scripts/build-sounds.ts && tsx scripts/build-near.ts",
+    "time": "tsx scripts/build-time.ts",
     "sounds": "tsx scripts/build-sounds.ts",
     "seasons": "tsx scripts/build-seasons.ts",
     "introduced": "tsx scripts/build-introduced.ts",
