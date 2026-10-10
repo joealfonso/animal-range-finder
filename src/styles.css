@@ -1255,3 +1255,45 @@ kbd {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* time travel: the slider that winds the heatmap back through the years */
+.time {
+  margin: 14px 0 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+.time label {
+  display: block;
+  margin-bottom: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.time input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.time-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: 9.5px;
+}
+.time-out {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+.time-out b {
+  font-weight: 500;
+  color: var(--ink);
+}
+.time .more {
+  margin-top: 8px;
+}

@@ -34,6 +34,9 @@ export interface Stage {
   showRange(cells: Cell[], points: number[][]): void;
   /** heat: smoothed record-density bands; points: every sampled wild record */
   setRangeMode(mode: 'heat' | 'points'): void;
+  /** Time travel: draw these cells (the range through an earlier year) instead of the current ones; null goes back. The
+   *  zoomed-in detail layer is built from today's records, so it stays off while a past year is shown. */
+  setPast(cells: Cell[] | null): void;
   clearRange(): void;
   project(lat: number, lng: number): { x: number; y: number; visible: boolean };
   shiftTo(x: number, y: number, ms: number): void;
@@ -257,6 +260,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   let detailOn = false; // the detail layer is drawn for roughly the current view and is showing instead of the world one
   let drawnAt: { lat: number; lng: number; altitude: number; halfSpan: number } | null = null;
   let lastMoveT = 0;
+  let curCells: Cell[] = [];
+  let past = false; // a past year is on show: only the world layer, from the era cells
   let detailCheck = false; // the camera moved (or the range changed) since the detail layer was last looked at
 
   // Points: one draw call for all records; a fixed size on screen so single records stay legible when zoomed in.
@@ -470,7 +475,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
 
   /** Keep the detail layer in step with the camera: drop it when zoomed out, redraw it once a move has settled. */
   function updateDetail(now: number, moved: boolean) {
-    if (!hasRange || rangeMode !== 'heat') return;
+    if (!hasRange || rangeMode !== 'heat' || past) return;
     if (moved) {
       lastMoveT = now;
       detailCheck = true;
@@ -587,6 +592,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     },
     showRange(cells, points) {
       hasRange = cells.length > 0 || points.length > 0;
+      curCells = cells;
+      past = false;
       if (cells.length) heat.show(cells);
       setRecords(points);
       // a new animal: whatever detail was drawn belongs to the last one
@@ -596,8 +603,18 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       detailCheck = true;
       applyMode();
     },
+    setPast(cells) {
+      past = !!cells;
+      if (cells) {
+        heat.show(cells);
+        detailOn = false;
+      } else if (curCells.length) heat.show(curCells);
+      applyMode();
+      detailCheck = true;
+    },
     clearRange() {
       hasRange = false;
+      past = false;
       heat.hide();
       applyMode();
     },

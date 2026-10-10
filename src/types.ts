@@ -112,3 +112,10 @@ export const STATUS_NOTE: Record<string, string> = {
   NE: 'Scientists haven’t checked yet how at risk it is, so this doesn’t mean it is safe or in danger.',
   VAR: 'It is a group of related animals, and each kind is rated on its own, from vulnerable to critically endangered.',
 };
+
+/** Records logged up to the end of `to`, as 2° cells whose last number is the records the cell stands for (data/time) */
+export interface TimeEra {
+  to: number;
+  n: number;
+  cells: Cell[];
+}
