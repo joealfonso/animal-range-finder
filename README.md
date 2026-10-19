@@ -38,6 +38,14 @@ Then run `npm run check`. It confirms every animal has its range, points and pho
 
 `npm run assets` re-creates the globe textures, country borders and per-country state files (NASA, Natural Earth). `npm run states` rebuilds only the state files.
 
+## Charts, the dashboard and the quiz
+
+All of these are counted in the browser from `species.json`, with no new data files and no estimates.
+
+- **On an animal's page:** its countries (and, inside a country, its states) as bars of their share of its records, and a histogram of every animal's record count with this one marked (`src/charts.ts`).
+- **By the numbers** (`src/overview.ts`): status, kind of animal, threatened animals by continent, the most and least recorded animals, and how many countries each animal is recorded in. Each bar filters the globe; picking a kind adds a "Kind" row to the filters.
+- **Play the quiz** (`src/quiz.ts`): ten rounds of naming an animal from the shading of its range, saying which of two has more records, and saying whether an animal is threatened. A wrong answer in the range round is always an animal with no country in common with the right one, so the shading alone can settle it. Only the best score is kept, in the browser's local storage.
+
 ## API keys
 
 None are needed. GBIF, Wikipedia and Wikimedia Commons are keyless. If a keyed source is added, read it from `process.env` in `scripts/`, list the variable in `.env.example`, and keep `.env` out of git (it is already ignored).
@@ -56,3 +64,4 @@ NASA Visible Earth (Blue Marble, public domain) · Natural Earth (public domain)
 - GBIF files some animals we don't mean under a species: dogs and dingoes under the wolf, for example. `EXCLUDE` in `scripts/build-data.ts` leaves those subspecies out. GBIF also doesn't separate the wild Bactrian camel from the domestic one, so the catalogue lists the Bactrian camel as a whole. The giraffe goes the other way: GBIF's *Giraffa camelopardalis* is only the northern giraffe, so `INCLUDE` adds the Masai, southern and reticulated giraffes, which together hold two thirds of the records.
 - "What lives here" measures to the nearest *recorded place*, so a real animal may well be closer, and an animal counted by area is only placed to within about 75 km. When the pin is on a continent the animal isn't listed on, the list marks it "unusual here": often an unflagged zoo or escaped animal (a ring-tailed lemur in France, a black rhino by Denver), but sometimes a real part of its range that few people record.
 - **Nothing is sampled.** An earlier version drew a few hundred to 1,200 records from the first pages of GBIF's search, which follow whichever datasets GBIF lists first, and the maps followed those datasets (a raven's map was mostly Sweden, though 56% of its records are American). Records are now counted. The totals come from GBIF's own search counts, and the build stops if the map counts don't add up to them. GBIF's plainer density map (`v2/map/occurrence/density`) is *not* used: it only counts records filed under the animal's own name, and was far short for some (11% of the alpine ibex's).
+- **The charts describe the catalogue and the records, not the world.** "26% threatened" is a share of the animals chosen for this catalogue, and a continent's threatened share counts the catalogue's animals recorded there. The record histogram and "most recorded" list measure how often people log an animal, which follows observers (the ten most recorded are all birds), not how common it is.
