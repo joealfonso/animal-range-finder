@@ -4,23 +4,20 @@ import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import './styles.css';
 
+import { createOverview } from './overview';
+import { createQuiz } from './quiz';
 import { createStage } from './stage';
 import { createSearch, type Filters, type Why } from './search';
 import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
+import { compact, groupPlural, ordinal, recordHistogram, shareBars } from './charts';
+import { esc, extLink, nf, plural } from './html';
 import { CLOSE_KM, NEAR_KM, createNear, type NearHit } from './near';
 import { STATUS_LABEL, STATUS_NOTE, type Cell, type Country, type More, type Pov, type Species, type StateFeature } from './types';
 
 const BASE = import.meta.env.BASE_URL;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const ESC_MAP: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ESC_MAP[c]);
-/** An outbound link, or just its text if the stored URL is not http(s), so bad data can never become a javascript: link. */
-const extLink = (url: string, html: string) =>
-  /^https?:\/\//i.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${html}</a>` : html;
-const nf = new Intl.NumberFormat('en-US');
-const plural = (n: number, one: string, many: string) => `${nf.format(n)} ${n === 1 ? one : many}`;
 const fmtKm = (km: number) => (km < 1 ? 'under 1 km' : `${nf.format(Math.round(km))} km`);
 /** The name as it would appear mid-sentence: "lion", but "American alligator". Taken from how the description writes it. */
 function midSentence(name: string, desc: string) {
@@ -76,6 +73,7 @@ async function boot() {
   const byIso = new Map([...countries].reverse().map((c) => [c.properties.iso, c]));
   const isoName = (iso: string) => byIso.get(iso)?.properties.name ?? iso;
   const byId = new Map(species.map((s) => [s.id, s]));
+  const allRecords = species.map((s) => s.occurrences);
   const slugs = makeSlugs(species);
 
   const stage = createStage($('globe'), countries, { small, reduced });
@@ -87,7 +85,7 @@ async function boot() {
   const { run, search } = createSearch(species, isoName);
 
   // ---------- state ----------
-  const filters: Filters = { continent: null, status: null, country: null, state: null };
+  const filters: Filters = { continent: null, status: null, group: null, country: null, state: null };
   let list: Species[] = species;
   let why = new Map<number, Why>(); // why each result matched, when its name doesn't say
   let activeIdx = 0;
@@ -97,6 +95,7 @@ async function boot() {
   // The place you were looking at when you opened the animal from a filtered list. Esc there closes the animal
   // and leaves you where you were, instead of stepping out through country and range.
   let placeEntry: { iso: string; state: string | null } | null = null;
+  let lastPlateFor = -1; // the animal the plate was last drawn for, so its bars grow in once, not at every redraw
   let statusKeyOpen = false; // the panel explaining the status codes, opened from the Status row
   // how the range is drawn; remembered per browser, heatmap by default
   let rangeMode: 'heat' | 'points' = 'heat';
@@ -206,7 +205,7 @@ async function boot() {
         return `No animal in the catalogue has a wild record within ${NEAR_KM} km of ${near.you ? 'you' : 'this pin'}. Out at sea, or somewhere few people record wildlife, that is expected. Drop the pin somewhere else, or clear it with ✕ below.`;
       return 'None of the animals near here match that. Try fewer filters.';
     }
-    const placeOnly = run('', { continent: null, status: null, country: filters.country, state: filters.state });
+    const placeOnly = run('', { continent: null, status: null, group: null, country: filters.country, state: filters.state });
     if (filters.state && !placeOnly.length)
       return `No animal's records place it in ${stateName(filters.state)}. A state is listed for an animal only when it holds a fair share of its records, so smaller ones are often empty. Pick another state, or clear it with ✕ below.`;
     if (filters.country && !placeOnly.length)
@@ -256,6 +255,11 @@ async function boot() {
             ? `<span class="hint status-hint"><b>${esc(STATUS_LABEL[filters.status])}.</b> ${esc(STATUS_NOTE[filters.status] ?? '')}</span>`
             : ''
         }</div>
+      ${
+        filters.group
+          ? `<div class="frow"><span class="flabel">Kind</span>${btn('group', filters.group, `${groupPlural(filters.group)} ✕`, true)}<span class="hint"><b>${list.length}</b> of ${species.length} animals</span></div>`
+          : ''
+      }
       <div class="frow place${filters.country || near || pinArmed ? ' is-set' : ''}"><span class="flabel">Place</span>${
         near
           ? btn('near', null, `${near.you ? 'Near you' : near.label ? `Pin in ${near.label}` : 'Pin at sea'} ✕`, true) +
@@ -388,6 +392,7 @@ async function boot() {
    * opts.stay: the caller is already flying the camera somewhere, so don't fly to the animal's range.
    */
   async function select(s: Species, opts: { placeChanged?: boolean; stay?: boolean } = {}) {
+    if (quiz.isOpen()) quiz.close();
     // Zoomed into a place? Stay there: from a country/state filter, or while another animal is open at a place.
     const fromFilter = (!selected || opts.placeChanged) && filters.country ? { iso: filters.country, state: filters.state } : null;
     const keep = fromFilter ?? (selected && activeCountry ? { iso: activeCountry, state: activeState } : null);
@@ -436,6 +441,7 @@ async function boot() {
     flightToken++;
     stopSound();
     selected = null;
+    lastPlateFor = -1;
     activeCountry = null;
     activeState = null;
     placeEntry = null;
@@ -557,6 +563,14 @@ async function boot() {
   }
 
   function back(): boolean {
+    if (numbers.isOpen()) {
+      numbers.close();
+      return true;
+    }
+    if (quiz.isOpen()) {
+      quiz.close();
+      return true;
+    }
     if (!creditsEl.hidden) {
       closeCredits();
       return true;
@@ -602,6 +616,11 @@ async function boot() {
     }
     if (filters.country) {
       clearCountryFilter();
+      return true;
+    }
+    if (filters.group) {
+      filters.group = null;
+      refresh();
       return true;
     }
     return false;
@@ -671,11 +690,78 @@ async function boot() {
     return `<span class="scale" aria-hidden="true">${rungs.map((r) => `<i class="${r === status ? 'on' : ''}">${r}</i>`).join('')}</span>`;
   }
 
+  /** "Recorded in 5 countries on 2 continents", above the bars. */
+  function rangeSummary(s: Species) {
+    const continents = s.continents.filter((c) => CONTINENT_SHORT[c]).length;
+    return `<p class="range-sum">${plural(s.countries.length, 'country', 'countries')}${
+      continents ? ` · ${plural(continents, 'continent', 'continents')}` : ''
+    }</p>`;
+  }
+
+  /** The countries it is recorded in: the biggest as bars of their share of its records, the rest as plain links. */
+  function rangeBars(s: Species) {
+    const BARS = 6;
+    const ordered = [...s.countries.filter((x) => !x.introduced), ...s.countries.filter((x) => x.introduced)];
+    const rest = ordered.slice(BARS);
+    return `${shareBars(
+      ordered.slice(0, BARS).map((x) => ({ key: x.iso, label: isoName(x.iso), share: x.share, introduced: x.introduced })),
+      'iso',
+      activeCountry,
+    )}${
+      rest.length
+        ? `<p class="sub">Also recorded in</p><ul class="range-list">${rest
+            .map(
+              (x) =>
+                `<li${x.introduced ? ' class="is-introduced"' : ''}><button type="button" data-iso="${x.iso}" aria-pressed="${x.iso === activeCountry}">${esc(isoName(x.iso))}</button>${x.introduced ? '<span class="tag">introduced</span>' : ''}</li>`,
+            )
+            .join('')}</ul>`
+        : ''
+    }`;
+  }
+
+  /** Where this animal's record count falls among all of them. It measures how often people log it, not how many there are. */
+  function recordsChart(s: Species) {
+    const rank = allRecords.filter((v) => v > s.occurrences).length + 1;
+    const mates = species.filter((x) => x.group === s.group);
+    const inGroup = mates.filter((x) => x.occurrences > s.occurrences).length + 1;
+    return `<div class="record-chart">
+        <p class="rank">Ranks <strong>${ordinal(rank)}</strong> of ${nf.format(species.length)} animals by records${
+          mates.length > 1 ? `, and <strong>${ordinal(inGroup)}</strong> of ${nf.format(mates.length)} ${esc(groupPlural(s.group).toLowerCase())}` : ''
+        }.</p>
+        ${recordHistogram(allRecords, s.occurrences, s.name)}
+        <p class="note">Each bar is the animals with about that many records, on a scale that grows tenfold at every step: a few well-watched birds have tens of millions, a few rare animals a handful. It shows how often people have logged ${esc(midSentence(s.name, s.desc))}, not how many there are.</p>
+      </div>`;
+  }
+
+  /** Other animals to open from here: the same family, then others of its kind that share its main country. */
+  function relatedFact(s: Species) {
+    const chip = (x: Species) => `<li><button type="button" data-open="${x.id}">${esc(x.name)}</button></li>`;
+    const kin = species.filter((x) => x.id !== s.id && x.family === s.family).slice(0, 6);
+    const home = s.countries[0];
+    const homeShare = (x: Species) => x.countries.find((c) => c.iso === home?.iso)?.share ?? 0;
+    const neighbours = home
+      ? species
+          .filter((x) => x.id !== s.id && x.group === s.group && !kin.includes(x) && homeShare(x) >= 0.1)
+          .sort((a, b) => homeShare(b) - homeShare(a))
+          .slice(0, Math.max(0, 6 - kin.length))
+      : [];
+    if (!kin.length && !neighbours.length) return '';
+    return `<div><dt>Related</dt><dd>${
+      kin.length ? `<p class="sub">Same family, ${esc(s.family)}</p><ul class="range-list">${kin.map(chip).join('')}</ul>` : ''
+    }${
+      neighbours.length
+        ? `<p class="sub">${esc(groupPlural(s.group))} also recorded in ${esc(isoName(home.iso))}</p><ul class="range-list">${neighbours.map(chip).join('')}</ul>`
+        : ''
+    }</dd></div>`;
+  }
+
   function renderPlate() {
     const s = selected;
     if (!s) return;
     if (playingId !== -1 && playingId !== s.id) stopSound();
     frameDirty = blockersDirty = true;
+    plate.classList.toggle('is-fresh', lastPlateFor !== s.id);
+    lastPlateFor = s.id;
     const focusedIso = (document.activeElement as HTMLElement | null)?.dataset?.iso;
     const focusedState = (document.activeElement as HTMLElement | null)?.dataset?.state;
     const c = s.credit;
@@ -697,17 +783,26 @@ async function boot() {
     const inCountry = activeCountry ? s.states.filter((x) => x.iso === activeCountry) : [];
     const stateHit = activeState ? s.states.find((x) => x.id === activeState) : null;
     const lower = esc(midSentence(s.name, s.desc));
-    const SHOW = 14;
+    const SHOW = 14; // states named in all
+    const BARS = 6; // places drawn as bars; the rest are listed beneath
     // the per-state list only makes sense inside the animal's range; elsewhere the note says it is (nearly) absent
     const statesBlock = activeCountry && s.iso.includes(activeCountry)
       ? inCountry.length
-        ? `<p class="sub">In ${esc(isoName(activeCountry))}</p><ul class="range-list states">${inCountry
-            .slice(0, SHOW)
-            .map(
-              (x) =>
-                `<li><button type="button" data-state="${esc(x.id)}" aria-pressed="${x.id === activeState}">${esc(x.name)}</button></li>`,
-            )
-            .join('')}${inCountry.length > SHOW ? `<li class="more">and ${inCountry.length - SHOW} more</li>` : ''}</ul>`
+        ? `<p class="sub">In ${esc(isoName(activeCountry))}</p>${shareBars(
+            inCountry.slice(0, BARS).map((x) => ({ key: x.id, label: x.name, share: x.share })),
+            'state',
+            activeState,
+          )}${
+            inCountry.length > BARS
+              ? `<ul class="range-list states">${inCountry
+                  .slice(BARS, SHOW)
+                  .map(
+                    (x) =>
+                      `<li><button type="button" data-state="${esc(x.id)}" aria-pressed="${x.id === activeState}">${esc(x.name)}</button></li>`,
+                  )
+                  .join('')}${inCountry.length > SHOW ? `<li class="more">and ${inCountry.length - SHOW} more</li>` : ''}</ul>`
+              : ''
+          }`
         : `<p class="note">No state of ${esc(isoName(activeCountry))} holds enough of its records to be listed.</p>`
       : '';
     // where Esc goes from here: back to the list you came from, or one level out
@@ -756,12 +851,7 @@ async function boot() {
       ${moreBlock(s)}
       <dl class="facts">
         ${nearFact(s)}
-        <div><dt>Range</dt><dd><ul class="range-list">${[...s.countries.filter((x) => !x.introduced), ...s.countries.filter((x) => x.introduced)]
-          .map(
-            (x) =>
-              `<li${x.introduced ? ' class="is-introduced"' : ''}><button type="button" data-iso="${x.iso}" aria-pressed="${x.iso === activeCountry}">${esc(isoName(x.iso))}</button>${x.introduced ? '<span class="tag">introduced</span>' : ''}</li>`,
-          )
-          .join('')}</ul>
+        <div><dt>Range</dt><dd>${rangeSummary(s)}${rangeBars(s)}
           ${
             s.countries.every((x) => x.introduced)
               ? '<p class="note">Every country here is marked “introduced”: most records of this animal come from places people brought it to, so this is not its native range.</p>'
@@ -771,7 +861,8 @@ async function boot() {
           }
           ${statesBlock}
           <p class="note">${note}</p>${fullRange}</dd></div>
-        <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF</dd></div>
+        <div><dt>Records</dt><dd>${nf.format(s.occurrences)} georeferenced observations on GBIF${recordsChart(s)}</dd></div>
+        ${relatedFact(s)}
         <div><dt>Map</dt><dd>
           ${
             rangeMode === 'heat'
@@ -921,6 +1012,18 @@ async function boot() {
       stage.setRangeMode(rangeMode);
       renderPlate();
       plate.querySelector<HTMLElement>(`button[data-mode="${rangeMode}"]`)?.focus();
+      return;
+    }
+    const op = t.closest<HTMLElement>('button[data-open]');
+    if (op?.dataset.open) {
+      const next = byId.get(Number(op.dataset.open));
+      if (next) {
+        activeCountry = null; // open it across its whole range, not zoomed into this animal's country
+        activeState = null;
+        placeEntry = null;
+        plate.scrollTop = 0;
+        void select(next);
+      }
       return;
     }
     const sb = t.closest<HTMLElement>('button[data-state]');
@@ -1196,11 +1299,94 @@ async function boot() {
     stage.shiftTo(...offset(!!selected, !!near), 0);
   });
 
+  // ---------- dashboard, quiz, surprise ----------
+  const numbersBtn = $('btn-stats');
+  const numbers = createOverview({
+    root: $('numbers'),
+    species,
+    reduced,
+    continents: CONTINENT_SHORT,
+    statusOrder: STATUS_ORDER,
+    onStatus: (code) => {
+      filters.status = code;
+      refresh();
+    },
+    onContinent: pickContinent,
+    onGroup: (g) => {
+      filters.group = g;
+      refresh();
+    },
+    onOpen: (s) => void select(s),
+    onPlay: () => startQuiz(),
+  });
+
+  // The quiz borrows the globe: the range of the animal in question is drawn without a name, and the plate slot holds the questions.
+  let quizShown = -1; // the animal whose range the quiz last asked for, so a slow load never draws a stale one
+  const quiz = createQuiz({
+    root: $('quiz'),
+    species,
+    base: BASE,
+    isoName,
+    showRange(s) {
+      quizShown = s.id;
+      void Promise.all([loadRange(s), loadPoints(s)]).then(([cells, pts]) => {
+        if (quizShown !== s.id) return;
+        stage.showRange(cells, pts, { coarse: !!s.binned });
+        flyTwoStage(rangePov(cells));
+      });
+    },
+    clearRange() {
+      quizShown = -1;
+      stage.clearRange();
+    },
+    openAnimal: (s) => void select(s),
+    onClose() {
+      document.body.classList.remove('has-plate', 'is-quiz');
+      stage.setRangeMode(rangeMode);
+      stage.shiftTo(...offset(false, !!near), 600);
+      blockersDirty = true;
+    },
+  });
+
+  function startQuiz() {
+    numbers.close(false);
+    if (selected) {
+      animalHome = null; // the quiz decides where the camera goes
+      deselect();
+    }
+    flightToken++;
+    stage.stopAutoRotate();
+    stage.setRangeMode('heat');
+    document.body.classList.add('has-plate', 'is-quiz');
+    stage.shiftTo(...offset(true), 700);
+    blockersDirty = true;
+    quiz.open();
+  }
+
+  function openNumbers() {
+    if (quiz.isOpen()) quiz.close();
+    numbers.open(() => numbersBtn.focus());
+  }
+
+  $('btn-quiz').addEventListener('click', startQuiz);
+  numbersBtn.addEventListener('click', openNumbers);
+  $('btn-random').addEventListener('click', () => {
+    if (quiz.isOpen()) quiz.close();
+    numbers.close(false);
+    q.blur();
+    const others = species.filter((s) => s.id !== selected?.id);
+    activeCountry = null;
+    activeState = null;
+    placeEntry = null;
+    void select(others[Math.floor(Math.random() * others.length)]);
+  });
+
   // ---------- animal of the day ----------
   const today = animalOfTheDay(species);
   const dailyBtn = $('daily');
   dailyBtn.textContent = `Today: ${today.name} →`;
   dailyBtn.addEventListener('click', () => {
+    if (quiz.isOpen()) quiz.close();
     q.blur();
     void select(today);
   });

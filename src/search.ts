@@ -4,6 +4,8 @@ import type { Species } from './types';
 export interface Filters {
   continent: string | null;
   status: string | null;
+  /** the kind of animal ('Mammal', 'Bird'...), set from the dashboard */
+  group: string | null;
   country: string | null;
   /** state/province id, only meaningful together with country */
   state: string | null;
@@ -287,6 +289,7 @@ export function createSearch(species: Species[], isoName: (iso: string) => strin
     }
     if (f.continent) list = list.filter((s) => s.continents.includes(f.continent!));
     if (f.status) list = list.filter((s) => s.status === f.status);
+    if (f.group) list = list.filter((s) => s.group === f.group);
     if (f.country) list = list.filter((s) => s.iso.includes(f.country!) || (s.states ?? []).some((x) => x.iso === f.country));
     if (f.state) list = list.filter((s) => (s.states ?? []).some((x) => x.id === f.state));
     return { list, why };

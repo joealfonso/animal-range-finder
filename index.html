@@ -37,6 +37,11 @@
       <p class="kicker"><span id="count">—</span> animals, catalogued by where people record them</p>
       <p class="readout" id="readout" aria-hidden="true">LAT — &nbsp; LON — &nbsp; ALT —</p>
       <button type="button" class="daily" id="daily"></button>
+      <p class="mast-links">
+        <button type="button" id="btn-quiz">Play the quiz</button>
+        <button type="button" id="btn-stats" aria-haspopup="dialog">By the numbers</button>
+        <button type="button" id="btn-random">Surprise me</button>
+      </p>
     </header>
 
     <nav class="index" aria-label="Animals">
@@ -45,6 +50,8 @@
     </nav>
 
     <aside class="plate" id="plate" aria-live="polite" hidden></aside>
+    <aside class="plate quiz" id="quiz" aria-label="Range quiz" hidden></aside>
+    <aside class="numbers" id="numbers" role="dialog" aria-modal="true" aria-label="The catalogue in numbers" hidden></aside>
 
     <footer class="finder">
       <label class="finder-field">
