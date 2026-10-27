@@ -57,7 +57,7 @@ for (const s of species) {
   if ('sampled' in s) fail(at, 'still has the old "sampled" count');
   if (s.binned !== undefined && !(s.binned > 0 && s.binned < 2)) fail(at, `binned is ${s.binned}`);
   if (s.pointsRounding === undefined) fail(at, 'no pointsRounding');
-  else if ((s.binned !== undefined) !== (s.pointsRounding > 0.5)) fail(at, `pointsRounding ${s.pointsRounding} does not match binned ${s.binned}`);
+  else if (s.binned !== undefined ? s.pointsRounding !== s.binned : s.pointsRounding > 0.1) fail(at, `pointsRounding ${s.pointsRounding} does not match binned ${s.binned}`);
   const countryShare = s.countries.reduce((a, c) => a + c.share, 0);
   if (countryShare > 1.003) fail(at, `country shares add up to ${countryShare}`);
   if (s.states.some((x) => !(x.share > 0 && x.share <= 1))) fail(at, 'a state has a share outside 0..1');

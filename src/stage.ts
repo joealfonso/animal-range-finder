@@ -255,7 +255,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   const detail = createDetailHeat(R);
   scene.add(detail.mesh);
   let rangePts: number[][] = [];
-  let coarse = false; // the points are ~155 km squares (AREA_CELL), so zooming in must not redraw them as if they were exact places
+  let coarse = false; // the points are ~39 km squares (AREA_CELL), so zooming in must not redraw them as if they were exact places
   let detailOn = false; // the detail layer is drawn for roughly the current view and is showing instead of the world one
   let drawnAt: { lat: number; lng: number; altitude: number; halfSpan: number } | null = null;
   let lastMoveT = 0;

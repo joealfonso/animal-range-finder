@@ -9,7 +9,7 @@
 import { tidy } from './lib/text';
 import sharp from 'sharp';
 import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
-import { fetchSquares, fetchCells, squaresOf, centreOf, squareOf, SQUARE_DEG, COLS } from './lib/density';
+import { fetchSquares, fetchCells, squaresOf, centreOf, squareOf, SQUARE_DEG } from './lib/density';
 
 const UA = 'animal-range-finder/0.1 (static data build; https://github.com/joealfonso/animal-range-finder)';
 const GBIF = 'https://api.gbif.org/v1';
@@ -139,7 +139,7 @@ interface Counted {
   binned: number | null;
   /** records per square of the world, when counted by area: the heatmap's cells are summed from these */
   squares?: Map<number, number>;
-  /** the same records at the map's own resolution (~0.1°), for placing them in states; absent when counted one by one */
+  /** the same records at the map's own resolution (0.35° x 0.18° or finer), for placing them in states; absent when counted one by one */
   stateCells?: Pt[];
   /** wild Russian records, and how many of them are west of the Urals (0°E to 60°E) */
   ru: { total: number; west: number };
@@ -170,7 +170,7 @@ const CAPTIVE_MEANS = 'establishmentMeans=MANAGED';
 const addTo = <K>(m: Map<K, number>, k: K, n: number) => m.set(k, (m.get(k) ?? 0) + n);
 
 /** The captive and managed records of these taxa, per square and per country, counted through the same map as everything else
- *  so the squares line up exactly (a record's own coordinates and the map's cells are a little apart). */
+ *  so the squares line up exactly. */
 async function captiveOf(keys: number[]) {
   const squares = new Map<number, number>();
   const countries = new Map<string, number>();
@@ -183,17 +183,6 @@ async function captiveOf(keys: number[]) {
   return { squares, countries };
 }
 
-// The map's own grid cells are 1.4° (four squares) across. Records of different searches (all of a species, its dogs, its
-// captive animals) only line up exactly at that size: a record can fall in one 0.35° square in one search and the next
-// in another. So captive records and excluded subspecies are taken off per 1.4° block, and the squares inside a block keep
-// the shape the whole animal's records have there, scaled to what is left.
-const BLOCK = 4;
-const blockOf = (id: number) => Math.floor(Math.floor(id / COLS) / BLOCK) * (COLS / BLOCK) + Math.floor((id % COLS) / BLOCK);
-const blocksOf = (m: Map<number, number>) => {
-  const out = new Map<number, number>();
-  for (const [id, n] of m) addTo(out, blockOf(id), n);
-  return out;
-};
 const sumOf = (m: Map<any, number>) => [...m.values()].reduce((a, n) => a + n, 0);
 
 /** Common animals: GBIF counts the records in every square of the world; captive records and excluded subspecies come off by hand. */
@@ -207,32 +196,31 @@ async function byArea(keys: number[], excludeKeys: number[]): Promise<Counted> {
     for (const [k, n] of from) m.set(k, Math.max(0, (m.get(k) ?? 0) - n));
   };
 
-  // what comes off, per block and per country: the excluded subspecies whole (their captive records with them) ...
+  // what comes off, per square and per country (the map's cells nest inside the squares, so every search puts a record in
+  // the same square): the excluded subspecies whole (their captive records with them) ...
   const removed = new Map<number, number>();
   let expected: number = head?.count ?? 0;
   for (const ex of excludeKeys) {
-    for (const [b, n] of blocksOf(await fetchSquares([ex], FILTERS))) addTo(removed, b, n);
+    for (const [id, n] of await fetchSquares([ex], FILTERS)) addTo(removed, id, n);
     const r = await getJSON(`${occBase([ex])}&limit=0&facet=country&facetLimit=300`);
     take(byCountry, countryMap(r));
     expected -= r?.count ?? 0;
   }
   // ... and the captive records of the rest, which are those of everything minus those of the excluded subspecies
   const cap = await captiveOf(keys);
-  const capBlocks = blocksOf(cap.squares);
   for (const ex of excludeKeys) {
     const capEx = await captiveOf([ex]);
-    take(capBlocks, blocksOf(capEx.squares));
+    take(cap.squares, capEx.squares);
     take(cap.countries, capEx.countries);
   }
-  for (const [b, n] of capBlocks) addTo(removed, b, Math.max(0, n));
+  for (const [id, n] of cap.squares) addTo(removed, id, Math.max(0, n));
   take(byCountry, cap.countries);
-  const captive = sumOf(capBlocks);
+  const captive = sumOf(cap.squares);
   expected -= captive;
 
-  const all = blocksOf(squares);
-  const keep = (b: number) => Math.max(0, (all.get(b) ?? 0) - (removed.get(b) ?? 0)) / (all.get(b) || 1);
-  for (const [id, n] of squares) squares.set(id, n * keep(blockOf(id)));
-  const stateCells: Pt[] = cells.map((c) => [c.lat, c.lng, null, c.n * keep(blockOf(squareOf(c.lat, c.lng)))]);
+  const keep = new Map([...squares].map(([id, n]) => [id, Math.max(0, n - (removed.get(id) ?? 0)) / (n || 1)]));
+  for (const [id, n] of squares) squares.set(id, n * keep.get(id)!);
+  const stateCells: Pt[] = cells.map((c) => [c.lat, c.lng, null, c.n * (keep.get(squareOf(c.lat, c.lng)) ?? 0)]);
   // the squares must add up to what GBIF's own counts say is left
   const left = sumOf(squares);
   if (Math.abs(left - expected) > Math.max(5, expected * 0.001)) throw new Error(`counted ${Math.round(left)} records by area but GBIF's counts leave ${expected}`);
@@ -240,22 +228,17 @@ async function byArea(keys: number[], excludeKeys: number[]): Promise<Counted> {
   const ruOf = async (extra: string) => ((await getJSON(`${occBase(keys)}&country=RU${extra}&limit=0`))?.count ?? 0) as number;
   const ru = { total: byCountry.get('RU') ?? 0, west: Math.min(byCountry.get('RU') ?? 0, await ruOf('&decimalLongitude=0,60')) };
 
-  // 2 x 2 squares make one place, about 0.7° across; a lone record in a place is left out, as stray records are in the heatmap
-  const side = SQUARE_DEG * 2;
-  const bins = new Map<number, number>();
+  // each square is a place, 0.35° across; a lone record in a square is left out, as stray records are in the heatmap
+  const places: Pt[] = [];
   let total = 0;
   for (const [id, n] of squares) {
     if (n <= 0) continue;
     total += n;
-    const b = Math.floor(Math.floor(id / COLS) / 2) * (COLS / 2) + Math.floor((id % COLS) / 2);
-    bins.set(b, (bins.get(b) ?? 0) + n);
-  }
-  const places: Pt[] = [];
-  for (const [b, n] of bins) {
     if (n < 2) continue;
-    places.push([Math.round((90 - (Math.floor(b / (COLS / 2)) + 0.5) * side) * 100) / 100, Math.round((-180 + ((b % (COLS / 2)) + 0.5) * side) * 100) / 100, null, n]);
+    const [lat, lng] = centreOf(id);
+    places.push([Math.round(lat * 1000) / 1000, Math.round(lng * 1000) / 1000, null, Math.round(n)]);
   }
-  return { total: Math.round(total), captive: Math.round(captive), byCountry, places, binned: Math.round(side * 100) / 100, squares, stateCells, ru };
+  return { total: Math.round(total), captive: Math.round(captive), byCountry, places, binned: Math.round(SQUARE_DEG * 100) / 100, squares, stateCells, ru };
 }
 
 /** Everything the range depends on: the counts, the places, countries, states and citations. */
@@ -640,15 +623,16 @@ for (const s of out) {
 // endangered and endangered animals, so the map never pinpoints where a threatened animal can be found. 'VAR' (the
 // Galápagos tortoises) counts: most of its species are critically endangered or endangered.
 // The white rhino and Indian rhino (horn) and the ground pangolin (scales) are not listed as endangered but are poached hard, so they
-// are rounded like the threatened animals. Animals counted by area are already shown as squares about 0.7° (75 km) across.
+// are rounded like the threatened animals. Animals counted by area are already shown as squares 0.35° (39 km) across, each
+// with its count: [lat, lng, records].
 const SENSITIVE = new Set(['CR', 'EN', 'EW', 'VAR']);
 const POACHED = new Set(['Ceratotherium simum', 'Rhinoceros unicornis', 'Smutsia temminckii']);
 for (const s of out) {
   const step = SENSITIVE.has(s.status) || POACHED.has(s.sci) ? 10 : 100; // 0.1° or 0.01°
   const seen = new Set<string>();
   const pts: number[][] = [];
-  for (const [lat, lng] of s.points as Pt[]) {
-    const p = s.binned ? [lat, lng] : [Math.round(lat * step) / step, Math.round(lng * step) / step];
+  for (const [lat, lng, , n] of s.points as Pt[]) {
+    const p = s.binned ? [lat, lng, n ?? 1] : [Math.round(lat * step) / step, Math.round(lng * step) / step];
     const k = p.join();
     if (seen.has(k)) continue; // rounding merges repeat sightings at the same spot
     seen.add(k);

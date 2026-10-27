@@ -301,11 +301,10 @@ export function createDetailHeat(globeRadius = R, altitude = 0.0052) {
 }
 
 /**
- * GBIF's map cells for animals counted by area (scripts/lib/density.ts, squareSize=8 at zoom 2) are 45°/32 = 1.406°
- * across, not the 0.7° the published `binned` says: the build sums them into 0.7° places, so only every other place
- * gets records, and a cell's centre falls on a place's edge and lands either side of it. Snapped back to the cells.
+ * The squares animals counted by area are published as (SQUARE_DEG in scripts/lib/density.ts, the published `binned`):
+ * 0.35°, about 39 km. Points are snapped back onto them, so rounding in the file can't shift a square.
  */
-export const AREA_CELL = 45 / 32;
+export const AREA_CELL = 180 / 512;
 const snap = (v: number, origin: number) => origin + (Math.round((v - origin) / AREA_CELL - 0.5) + 0.5) * AREA_CELL;
 
 /**
