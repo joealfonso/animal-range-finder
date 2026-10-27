@@ -418,7 +418,7 @@ async function boot() {
 
     const [cells, pts] = await Promise.all([loadRange(s), loadPoints(s)]);
     if (selected?.id !== s.id) return;
-    stage.showRange(cells, pts, { coarse: !!s.binned });
+    stage.showRange(cells, pts, { coarse: s.binned });
     shownPoints = pts.length;
     if (rangeMode === 'points') renderPlate(); // the legend counts the points
     animalPov = rangePov(cells);
@@ -866,15 +866,12 @@ async function boot() {
         <div><dt>Map</dt><dd>
           ${
             rangeMode === 'heat'
-              ? `<span class="legend" aria-hidden="true">${HEAT_BANDS.slice(1)
-                  .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
-                  .join('')}</span>
-                 <span class="legend-ends" aria-hidden="true"><span>fewer records</span><span>more</span></span>
-                 <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest, counted from every GBIF record of this animal. Each darker step holds many times more records than the one before, so faint areas are real but thin. ${s.binned ? 'It is smoothed over about 2°.' : 'Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the places in view, with the shading relative to what is in view.'} It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
-              : `<p class="legend-point"><i aria-hidden="true"></i>${s.binned ? 'A square with records' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
+              ? `${heatLegend('whole range', 'most-recorded 3%')}
+                 <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest, counted from every GBIF record of this animal. The palest band is everywhere it has been recorded; each step up covers a smaller share of that area with the most records: the top half, quarter, 10% and 3%. So the brightest patches are always the busiest few percent of its range, however big the range is. ${s.binned ? 'It is smoothed over about 2°.' : 'Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the places in view, with the bands taken from what is in view.'} It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
+              : `${s.binned ? heatLegend('top 50% of squares', 'top 3%') : ''}<p class="legend-point${s.binned ? ' is-square' : ''}"><i aria-hidden="true"></i>${s.binned ? 'A square with records' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
                  <details class="more"><summary>About these points</summary><p class="note">${
                    s.binned
-                     ? 'Each point is a square about 75 km across that holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area and each square is marked once.'
+                     ? 'Each square is about 155 km across (1.4°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area. Brighter squares sit where it is recorded most: the top half, quarter, 10% and 3% of squares, as on the heatmap.'
                      : `Each point is a place where a wild record was logged, rounded to ${
                          s.pointsRounding === 0.1
                            ? 'about 11 km, because this animal is threatened or poached and exact locations can help poachers'
@@ -892,6 +889,13 @@ async function boot() {
     plate.hidden = false;
     if (focusedIso) plate.querySelector<HTMLElement>(`button[data-iso="${focusedIso}"]`)?.focus();
     if (focusedState) plate.querySelector<HTMLElement>(`button[data-state="${CSS.escape(focusedState)}"]`)?.focus();
+  }
+
+  /** the heatmap's bands as a key, with what its two ends stand for */
+  function heatLegend(low: string, high: string) {
+    return `<span class="legend" aria-hidden="true">${HEAT_BANDS.slice(1)
+      .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
+      .join('')}</span><span class="legend-ends" aria-hidden="true"><span>${low}</span><span>${high}</span></span>`;
   }
 
   /** "Read more": the rest of the Wikipedia introduction and a few sentences each on looks, behaviour, diet, home and young. */
@@ -956,7 +960,7 @@ async function boot() {
         : ''
     }${
       s.binned
-        ? 'This animal is drawn as squares about 75 km across, so the distance is only good to about that. '
+        ? 'This animal is drawn as squares about 155 km across, so the distance is only good to about that. '
         : s.pointsRounding === 0.1
           ? 'Places of this threatened or poached animal are rounded to about 11 km, so the distance is too. '
           : ''
@@ -1331,7 +1335,7 @@ async function boot() {
       quizShown = s.id;
       void Promise.all([loadRange(s), loadPoints(s)]).then(([cells, pts]) => {
         if (quizShown !== s.id) return;
-        stage.showRange(cells, pts, { coarse: !!s.binned });
+        stage.showRange(cells, pts, { coarse: s.binned });
         flyTwoStage(rangePov(cells));
       });
     },

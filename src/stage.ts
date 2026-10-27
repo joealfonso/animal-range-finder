@@ -1,7 +1,7 @@
 import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
-import { createDetailHeat, createHeat } from './heat';
+import { createDetailHeat, createHeat, createSquares } from './heat';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -31,7 +31,8 @@ export interface Stage {
   /** How close we are: record points grow a little as you drill from the whole range to a country to a state. */
   setRangeDetail(level: 'range' | 'country' | 'state'): void;
   /** cells feed the heatmap; points are the individual (rounded) wild records */
-  showRange(cells: Cell[], points: number[][], opts?: { coarse?: boolean }): void;
+  /** coarse: the points are squares `coarse` degrees across (animals counted by area), drawn as shaded squares */
+  showRange(cells: Cell[], points: number[][], opts?: { coarse?: number }): void;
   /** heat: smoothed record-density bands; points: every place with a wild record */
   setRangeMode(mode: 'heat' | 'points'): void;
   clearRange(): void;
@@ -254,7 +255,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   const detail = createDetailHeat(R);
   scene.add(detail.mesh);
   let rangePts: number[][] = [];
-  let coarse = false; // the points are ~75 km squares, so zooming in must not redraw them as if they were exact places
+  let coarse = false; // the points are ~155 km squares (AREA_CELL), so zooming in must not redraw them as if they were exact places
   let detailOn = false; // the detail layer is drawn for roughly the current view and is showing instead of the world one
   let drawnAt: { lat: number; lng: number; altitude: number; halfSpan: number } | null = null;
   let lastMoveT = 0;
@@ -289,11 +290,14 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   records.frustumCulled = false;
   records.visible = false;
   scene.add(records);
+  const squares = createSquares(R);
+  scene.add(squares.mesh);
 
   const applyMode = () => {
     heat.setVisible(hasRange && rangeMode === 'heat' && !detailOn);
     detail.setVisible(hasRange && rangeMode === 'heat' && detailOn);
-    records.visible = hasRange && rangeMode === 'points';
+    records.visible = hasRange && rangeMode === 'points' && !coarse;
+    squares.setVisible(hasRange && rangeMode === 'points' && coarse);
   };
   const setPointSize = () => {
     recMat.uniforms.size.value = pointPx * dpr;
@@ -592,7 +596,8 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       coarse = !!opts?.coarse;
       hasRange = cells.length > 0 || points.length > 0;
       if (cells.length) heat.show(cells);
-      setRecords(points);
+      if (opts?.coarse) squares.show(points, cells);
+      else setRecords(points);
       // a new animal: whatever detail was drawn belongs to the last one
       rangePts = points;
       drawnAt = null;

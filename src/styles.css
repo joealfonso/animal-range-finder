@@ -534,6 +534,10 @@ kbd {
   background: var(--accent);
   box-shadow: 0 0 0 1px #1c0904;
 }
+.legend-point.is-square i {
+  border-radius: 0;
+  box-shadow: none;
+}
 .plate .back {
   font-family: var(--mono);
   font-size: 11px;
