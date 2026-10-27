@@ -871,7 +871,7 @@ async function boot() {
               : `${s.binned ? heatLegend('top 50% of squares', 'top 3%') : ''}<p class="legend-point${s.binned ? ' is-square' : ''}"><i aria-hidden="true"></i>${s.binned ? 'A square with records' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
                  <details class="more"><summary>About these points</summary><p class="note">${
                    s.binned
-                     ? 'Each square is about 155 km across (1.4°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area. Brighter squares sit where it is recorded most: the top half, quarter, 10% and 3% of squares, as on the heatmap.'
+                     ? 'Each square is about 39 km across (0.35°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area. Brighter squares sit where it is recorded most: the top half, quarter, 10% and 3% of squares, as on the heatmap.'
                      : `Each point is a place where a wild record was logged, rounded to ${
                          s.pointsRounding === 0.1
                            ? 'about 11 km, because this animal is threatened or poached and exact locations can help poachers'
@@ -960,7 +960,7 @@ async function boot() {
         : ''
     }${
       s.binned
-        ? 'This animal is drawn as squares about 155 km across, so the distance is only good to about that. '
+        ? 'This animal is drawn as squares about 39 km across, so the distance is only good to about that. '
         : s.pointsRounding === 0.1
           ? 'Places of this threatened or poached animal are rounded to about 11 km, so the distance is too. '
           : ''
