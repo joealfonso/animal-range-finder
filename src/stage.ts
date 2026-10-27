@@ -1,7 +1,7 @@
 import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
-import { createDetailHeat, createHeat, createSquares } from './heat';
+import { createCellDots, createDetailHeat, createHeat } from './heat';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -31,7 +31,7 @@ export interface Stage {
   /** How close we are: record points grow a little as you drill from the whole range to a country to a state. */
   setRangeDetail(level: 'range' | 'country' | 'state'): void;
   /** cells feed the heatmap; points are the individual (rounded) wild records */
-  /** coarse: the points are squares `coarse` degrees across (animals counted by area), drawn as shaded squares */
+  /** coarse: the points are squares `coarse` degrees across (animals counted by area), drawn as dots sized by records */
   showRange(cells: Cell[], points: number[][], opts?: { coarse?: number }): void;
   /** heat: smoothed record-density bands; points: every place with a wild record */
   setRangeMode(mode: 'heat' | 'points'): void;
@@ -290,14 +290,14 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   records.frustumCulled = false;
   records.visible = false;
   scene.add(records);
-  const squares = createSquares(R);
-  scene.add(squares.mesh);
+  const cellDots = createCellDots(R);
+  scene.add(cellDots.mesh);
 
   const applyMode = () => {
     heat.setVisible(hasRange && rangeMode === 'heat' && !detailOn);
     detail.setVisible(hasRange && rangeMode === 'heat' && detailOn);
     records.visible = hasRange && rangeMode === 'points' && !coarse;
-    squares.setVisible(hasRange && rangeMode === 'points' && coarse);
+    cellDots.setVisible(hasRange && rangeMode === 'points' && coarse);
   };
   const setPointSize = () => {
     recMat.uniforms.size.value = pointPx * dpr;
@@ -596,7 +596,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       coarse = !!opts?.coarse;
       hasRange = cells.length > 0 || points.length > 0;
       if (cells.length) heat.show(cells);
-      if (opts?.coarse) squares.show(points, cells);
+      if (opts?.coarse) cellDots.show(points, cells);
       else setRecords(points);
       // a new animal: whatever detail was drawn belongs to the last one
       rangePts = points;

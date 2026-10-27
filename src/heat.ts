@@ -309,13 +309,17 @@ const snap = (v: number, origin: number) => origin + (Math.round((v - origin) / 
 
 /**
  * The Points view for animals counted by area. Their places sit on a fixed lattice, and drawn as equal dots a wide
- * range turns into a regular grid that says only "recorded here". Drawn instead as the squares they are,
- * shaded by records, they read as a fine-grained map: where the animal was recorded, square by square, and where it
- * is recorded most. The shading is a square's own count when the data has it (a third value in the point), and
- * otherwise the 2° density around it (the world heatmap's surface, sampled at the square). Classes are the same area
- * quantiles as the heatmap's bands.
+ * range turns into a regular grid that says only "recorded here". Each is drawn instead as a dot at its cell's
+ * centre, sized and shaded by records (graduated symbols, as in a printed atlas): small and dim where the animal is
+ * recorded thinly, swelling until neighbours touch where it is recorded most, so the lattice gives way to the
+ * pattern. The weight is a cell's own count when the data has it (a third value in the point), and otherwise the
+ * 2° density around it (the world heatmap's surface, sampled at the cell). Classes are the same area quantiles as
+ * the heatmap's bands.
  */
-export function createSquares(globeRadius = R, altitude = 0.0048) {
+/** dot radius per class, as a share of half a cell: the area grows about sixfold from the faintest to the top */
+const DOT_R = [0.4, 0.52, 0.64, 0.8, 0.98];
+
+export function createCellDots(globeRadius = R, altitude = 0.0048) {
   const geo = new THREE.BufferGeometry();
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geo, mat);
@@ -331,7 +335,7 @@ export function createSquares(globeRadius = R, altitude = 0.0048) {
     const s = Math.sin(theta);
     out.push(-radius * Math.cos(phi) * s, radius * Math.cos(theta), radius * Math.sin(phi) * s);
   };
-  // the heatmap's colours, more opaque: a square is a discrete mark, not a wash
+  // the heatmap's colours, more opaque: a dot is a discrete mark, not a wash
   const colours = HEAT_BANDS.slice(1).map(([r, g, b, a]) => {
     const c = new THREE.Color(r / 255, g / 255, b / 255).convertSRGBToLinear();
     return [c.r, c.g, c.b, Math.min(0.9, 0.2 + a)];
@@ -379,25 +383,28 @@ export function createSquares(globeRadius = R, altitude = 0.0048) {
       const side = AREA_CELL;
       const at = points.some((p) => p.length > 2) ? null : smoothed(cells);
       const w = points.map((p) => (at ? at(p[0], p[1]) : p[2] ?? 1));
-      // class breaks: the values at the top 50%, 25%, 10% and 3% of the squares
+      // class breaks: the values at the top 50%, 25%, 10% and 3% of the cells
       const sorted = [...w].sort((a, b) => a - b);
       const breaks = HEAT_TOP.map((t) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * (1 - t)))]);
       const pos: number[] = [];
       const col: number[] = [];
-      const h = side / 2;
+      const SEG = 14;
       points.forEach((p, i) => {
         let k = 0;
         while (k < breaks.length && w[i] >= breaks[k] && (k === 0 || breaks[k] > breaks[k - 1])) k++;
         const [lat, lng] = p;
-        const cs = [
-          [lat + h, lng - h],
-          [lat + h, lng + h],
-          [lat - h, lng + h],
-          [lat - h, lng - h],
-        ];
-        for (const j of [0, 1, 2, 0, 2, 3]) {
-          place(Math.max(-90, Math.min(90, cs[j][0])), cs[j][1], pos);
-          col.push(...colours[k]);
+        // radius as a share of half the cell: the top class nearly touches its neighbours, the faintest is a speck.
+        // A cell narrows on the ground towards the poles (by cos lat), so the dot does too, or at 60°N neighbours
+        // run together into streaks along each row.
+        const cos = Math.max(0.05, Math.cos(lat * rad));
+        const r = (side / 2) * DOT_R[k] * cos;
+        for (let j = 0; j < SEG; j++) {
+          const a0 = (j / SEG) * Math.PI * 2;
+          const a1 = ((j + 1) / SEG) * Math.PI * 2;
+          place(lat, lng, pos);
+          place(lat + r * Math.sin(a0), lng + (r * Math.cos(a0)) / cos, pos);
+          place(lat + r * Math.sin(a1), lng + (r * Math.cos(a1)) / cos, pos);
+          for (let v = 0; v < 3; v++) col.push(...colours[k]);
         }
       });
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
