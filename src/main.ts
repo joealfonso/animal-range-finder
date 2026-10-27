@@ -868,10 +868,10 @@ async function boot() {
             rangeMode === 'heat'
               ? `${heatLegend('whole range', 'most-recorded 3%')}
                  <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest, counted from every GBIF record of this animal. The palest band is everywhere it has been recorded; each step up covers a smaller share of that area with the most records: the top half, quarter, 10% and 3%. So the brightest patches are always the busiest few percent of its range, however big the range is. ${s.binned ? 'It is smoothed over about 2°.' : 'Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the places in view, with the bands taken from what is in view.'} It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
-              : `${s.binned ? heatLegend('top 50% of squares', 'top 3%') : ''}<p class="legend-point${s.binned ? ' is-square' : ''}"><i aria-hidden="true"></i>${s.binned ? 'A square with records' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
+              : `${s.binned ? heatLegend('top 50% of squares', 'top 3%') : ''}<p class="legend-point"><i aria-hidden="true"></i>${s.binned ? 'A square with records; bigger and brighter where there are more' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
                  <details class="more"><summary>About these points</summary><p class="note">${
                    s.binned
-                     ? 'Each square is about 155 km across (1.4°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area. Brighter squares sit where it is recorded most: the top half, quarter, 10% and 3% of squares, as on the heatmap.'
+                     ? 'Each square is about 155 km across (1.4°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area and each square gets one dot at its centre. The dots grow and brighten where it is recorded most: the top half, quarter, 10% and 3% of squares, as on the heatmap.'
                      : `Each point is a place where a wild record was logged, rounded to ${
                          s.pointsRounding === 0.1
                            ? 'about 11 km, because this animal is threatened or poached and exact locations can help poachers'
@@ -960,7 +960,7 @@ async function boot() {
         : ''
     }${
       s.binned
-        ? 'This animal is drawn as squares about 155 km across, so the distance is only good to about that. '
+        ? 'This animal is counted in squares about 155 km across, so the distance is only good to about that. '
         : s.pointsRounding === 0.1
           ? 'Places of this threatened or poached animal are rounded to about 11 km, so the distance is too. '
           : ''
