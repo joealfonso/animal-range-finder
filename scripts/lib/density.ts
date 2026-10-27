@@ -5,7 +5,15 @@
 // counts every record instead, so the squares below are the whole data set, not a sample of it.
 //
 // The API answers with Mapbox vector tiles. This file reads the little of that format it needs (no dependency): every
-// cell is a polygon with a `total` property. At zoom 2 the world is 32 tiles of 45°, and a cell is about 0.1° across.
+// cell is a polygon with a `total` property.
+//
+// How big a cell really is: GBIF adds records up into its own grid, and how fine that grid is depends on the zoom, not on
+// `squareSize` (that only sets how big each cell is drawn, from its top-left corner). At zoom 2 most records are lumped
+// into aligned 1.406° cells (checked: the mallard's 510,059 records in 50.6–52.0°N, 4.2–5.6°E all sit in one cell), so
+// counts per 0.35° square were wrong: whole 1.4° blocks of squares held nothing and one held everything. At zoom 4 the
+// cells are 0.35° x 0.18° or smaller and nest inside the squares below, and their sums match the occurrence search square
+// by square (checked on 15 mallard squares in western Europe). Zoom 4 is 512 tiles, so only the tiles under a zoom 2 tile
+// that has records are read.
 //
 // What was checked, and why this endpoint and not the plainer one (v2/map/occurrence/density):
 // - the ad-hoc endpoint takes the same filters as the occurrence search and its totals equal the search's counts exactly
@@ -23,7 +31,9 @@ export const SQUARE_DEG = 180 / 512;
 /** Squares across the world, and from pole to pole. */
 export const COLS = 360 / SQUARE_DEG;
 export const ROWS = 180 / SQUARE_DEG;
-const ZOOM = 2;
+const ZOOM = 4;
+/** the coarse zoom read first, to skip the parts of the world with no records */
+const SCOUT = 2;
 const TILE_DEG = 180 / 2 ** ZOOM;
 
 /** A square's id: its row and column together. */
@@ -87,7 +97,8 @@ function reader(buf: Uint8Array) {
 }
 const unzig = (n: number) => (n % 2 === 0 ? n / 2 : -(n + 1) / 2);
 
-/** Every cell in a tile: its centre in px (of 4096 across the tile), and the records in it. */
+/** Every cell in a tile: its top-left corner in px (of 4096 across the tile), which is where GBIF binned its records, and
+ *  how many there are. (Its middle depends on `squareSize` and can fall in the next square.) */
 export function readTile(buf: Uint8Array): { x: number; y: number; total: number }[] {
   const out: { x: number; y: number; total: number }[] = [];
   const tile = reader(buf);
@@ -140,13 +151,11 @@ export function readTile(buf: Uint8Array): { x: number; y: number; total: number
       }
       let total = NaN;
       for (let i = 0; i < tags.length; i += 2) if (tags[i] === totalKey) total = values[tags[i + 1]];
-      // geometry: MoveTo(1) then LineTo(2) commands with zigzag deltas; the cell's centre is the middle of its corners
+      // geometry: MoveTo(1) then LineTo(2) commands with zigzag deltas; the cell's corner is the least x and y of them
       let x = 0;
       let y = 0;
       let x0 = Infinity;
       let y0 = Infinity;
-      let x1 = -Infinity;
-      let y1 = -Infinity;
       for (let i = 0; i < geom.length; ) {
         const cmd = geom[i] & 7;
         const n = geom[i] >> 3;
@@ -157,50 +166,57 @@ export function readTile(buf: Uint8Array): { x: number; y: number; total: number
           y += unzig(geom[i++]);
           x0 = Math.min(x0, x);
           y0 = Math.min(y0, y);
-          x1 = Math.max(x1, x);
-          y1 = Math.max(y1, y);
         }
       }
       if (!Number.isFinite(total) || !Number.isFinite(x0)) throw new Error('density tile has a cell without a count or a position');
-      out.push({ x: (x0 + x1) / 2, y: (y0 + y1) / 2, total });
+      out.push({ x: x0, y: y0, total });
     }
   }
   return out;
 }
 
-/** One cell of the map: where its records are (their middle), and how many there are. */
+/** One cell of the map: where its records are (just inside its north-west corner), and how many there are. */
 export type Cell = { lat: number; lng: number; n: number };
 
 /**
- * The records matching a search, cell by cell (a cell is about 0.1° across). `taxonKeys` are searched together, as the
+ * The records matching a search, cell by cell (a cell is 0.35° x 0.18° or smaller, inside one square). `taxonKeys` are searched together, as the
  * occurrence search does; `filters` is the rest of the search as a query string (without a leading &). Throws if GBIF can't
  * be reached: a failed request must never read as "no records".
  */
 export async function fetchCells(taxonKeys: number[], filters: string): Promise<Cell[]> {
-  const cells: Cell[] = [];
   const taxa = taxonKeys.map((k) => `taxonKey=${k}`).join('&');
-  const n = 2 ** ZOOM;
-  const work = Array.from({ length: n * 2 * n }, (_, i) => [i % (2 * n), Math.floor(i / (2 * n))] as const);
-  await Promise.all(
-    Array.from({ length: 4 }, async () => {
-      for (let t = work.shift(); t; t = work.shift()) {
-        const [x, y] = t;
-        const url = `${GBIF}/v2/map/occurrence/adhoc/${ZOOM}/${x}/${y}.mvt?srs=EPSG:4326&bin=square&squareSize=8&${taxa}&hasCoordinate=true&${filters}`;
-        let buf: Uint8Array | null = null;
-        for (let i = 0; i < 6 && !buf; i++) {
-          const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(120000) }).catch(() => null);
-          if (res?.status === 204) buf = new Uint8Array(0);
-          else if (res?.ok) buf = new Uint8Array(await res.arrayBuffer());
-          // a tile with nothing in it is sometimes a 400 with this message instead of a 204; any other 400 is a real error
-          else if (res?.status === 400 && (await res.text()).includes('missing the expected layer')) buf = new Uint8Array(0);
-          else await sleep(1000 * (i + 1) * (res?.status === 429 ? 3 : 1));
-        }
-        if (!buf) throw new Error(`density tile failed: ${url}`);
-        for (const c of buf.length ? readTile(buf) : [])
-          cells.push({ lat: 90 - (y * TILE_DEG + (c.y * TILE_DEG) / 4096), lng: -180 + (x * TILE_DEG + (c.x * TILE_DEG) / 4096), n: c.total });
-      }
-    }),
-  );
+  const tile = async (z: number, x: number, y: number) => {
+    const url = `${GBIF}/v2/map/occurrence/adhoc/${z}/${x}/${y}.mvt?srs=EPSG:4326&bin=square&squareSize=8&${taxa}&hasCoordinate=true&${filters}`;
+    let buf: Uint8Array | null = null;
+    for (let i = 0; i < 6 && !buf; i++) {
+      const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(120000) }).catch(() => null);
+      if (res?.status === 204) buf = new Uint8Array(0);
+      else if (res?.ok) buf = new Uint8Array(await res.arrayBuffer());
+      // a tile with nothing in it is sometimes a 400 with this message instead of a 204; any other 400 is a real error
+      else if (res?.status === 400 && (await res.text()).includes('missing the expected layer')) buf = new Uint8Array(0);
+      else await sleep(1000 * (i + 1) * (res?.status === 429 ? 3 : 1));
+    }
+    if (!buf) throw new Error(`density tile failed: ${url}`);
+    return buf.length ? readTile(buf) : [];
+  };
+  const inFour = async <T>(work: T[], each: (t: T) => Promise<void>) =>
+    Promise.all(Array.from({ length: 4 }, async () => {
+      for (let t = work.shift(); t !== undefined; t = work.shift()) await each(t);
+    }));
+  const grid = (z: number) => Array.from({ length: 2 ** z * 2 ** (z + 1) }, (_, i) => [i % 2 ** (z + 1), Math.floor(i / 2 ** (z + 1))] as const);
+
+  // the zoom 4 tiles under each zoom 2 tile that has any records
+  const k = 2 ** (ZOOM - SCOUT);
+  const work: (readonly [number, number])[] = [];
+  await inFour(grid(SCOUT), async ([x, y]) => {
+    if ((await tile(SCOUT, x, y)).length) for (let i = 0; i < k * k; i++) work.push([x * k + (i % k), y * k + Math.floor(i / k)]);
+  });
+  const cells: Cell[] = [];
+  await inFour(work, async ([x, y]) => {
+    // half a px in from the corner, so a corner on a square's edge can't round into the square beside it
+    for (const c of await tile(ZOOM, x, y))
+      cells.push({ lat: 90 - (y * TILE_DEG + ((c.y + 0.5) * TILE_DEG) / 4096), lng: -180 + (x * TILE_DEG + ((c.x + 0.5) * TILE_DEG) / 4096), n: c.total });
+  });
   return cells;
 }
 
