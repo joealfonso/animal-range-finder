@@ -7,14 +7,15 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && tsx scripts/build-seo.ts",
     "preview": "vite preview",
-    "data": "tsx scripts/build-data.ts && tsx scripts/build-introduced.ts && tsx scripts/build-sounds.ts && tsx scripts/build-more.ts && tsx scripts/build-near.ts",
+    "data": "tsx scripts/build-data.ts && tsx scripts/build-thumbs.ts && tsx scripts/build-introduced.ts && tsx scripts/build-sounds.ts && tsx scripts/build-more.ts && tsx scripts/build-near.ts",
     "sounds": "tsx scripts/build-sounds.ts",
     "more": "tsx scripts/build-more.ts",
     "introduced": "tsx scripts/build-introduced.ts",
     "audit": "tsx scripts/audit-status.ts",
     "assets": "tsx scripts/fetch-assets.ts && tsx scripts/fetch-states.ts",
     "states": "tsx scripts/fetch-states.ts",
-    "check": "tsx scripts/check-data.ts"
+    "check": "tsx scripts/check-data.ts",
+    "thumbs": "tsx scripts/build-thumbs.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
