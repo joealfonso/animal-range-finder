@@ -156,7 +156,7 @@ async function boot() {
       .map(
         (s, i) => `<li role="option" id="opt-${s.id}" data-i="${i}" aria-selected="${selected?.id === s.id}"
             class="${i === activeIdx ? 'is-active' : ''}${selected?.id === s.id ? ' is-open' : ''}">
-          <span class="no">${s.no}</span>
+          ${s.img ? `<img class="th" src="${BASE}${s.img.replace('img/', 'thumb/')}" alt="" width="44" height="44" loading="lazy" decoding="async" />` : '<span class="th"></span>'}
           <span class="nm">${esc(s.name)}</span>
           <span class="st" data-s="${s.status}" title="${STATUS_LABEL[s.status] ?? ''}">${s.status}</span>
           <span class="la">${esc(s.sci)}${whyTag(s)}${nearKm(s)}</span>
