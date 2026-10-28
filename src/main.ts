@@ -881,7 +881,7 @@ async function boot() {
           }
         </dd></div>
       </dl>
-      <details class="more prov"><summary>Data sources and caveats</summary><p>Where it lives is drawn from all ${nf.format(s.occurrences)} of its GBIF occurrence records with a location (grouped into 2° cells), not an expert range map. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
+      <details class="more prov"><summary>Data sources and caveats</summary><p>Where it lives is drawn from its ${nf.format(s.occurrences)} GBIF occurrence records with a location (grouped into 2° cells), not an expert range map. The map shows only the continents it is counted on (where a country holds at least 1.5% of its records), so thin range elsewhere is left off. ${s.captiveExcluded ? `${plural(s.captiveExcluded, 'record', 'records')} GBIF flags as captive or managed ${s.captiveExcluded === 1 ? 'is' : 'are'} left out; ` : ''}unflagged zoo animals can still slip through, so edges are approximate. Data from ${s.datasets
         .map((d) => (d.doi ? `<a href="https://doi.org/${esc(d.doi.replace(/^doi:/, ''))}" target="_blank" rel="noopener">${esc(d.title)}</a>` : esc(d.title)))
         .join('; ')}. Conservation category: IUCN Red List via GBIF. ${
         s.wiki ? `Text: ${extLink(s.wiki, 'Wikipedia')}, CC BY-SA 4.0.` : ''

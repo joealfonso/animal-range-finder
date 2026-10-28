@@ -92,7 +92,7 @@ ${s.img ? `        <figure><img src="/${esc(s.img)}" width="${s.imgW ?? ''}" hei
         <h2>Conservation status</h2>
         <p><b>${esc(label)}</b> (${esc(s.status)}).${STATUS_NOTE[s.status] ? ' ' + esc(STATUS_NOTE[s.status]) : ''} Categories are the IUCN Red List as republished by GBIF.</p>
         <h2>Sources</h2>
-        <p>The range is a density of ${s.occurrences.toLocaleString('en-US')} georeferenced GBIF records, not an expert-drawn map.${
+        <p>The range is a density of ${s.occurrences.toLocaleString('en-US')} georeferenced GBIF records, shown on the continents where it is mainly recorded, not an expert-drawn map.${
           s.wiki ? ` Description from <a href="${esc(s.wiki)}">Wikipedia</a>.` : ''
         }</p>
       </article>`;
