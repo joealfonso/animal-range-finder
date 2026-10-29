@@ -1,7 +1,20 @@
 import Globe from 'globe.gl';
 import * as THREE from 'three';
 import { createStars } from './stars';
-import { createCellDots, createDetailHeat, createHeat } from './heat';
+import { createDetailHeat, createHeat, createStipple } from './heat';
+import {
+  boxClasses,
+  buildMarks,
+  detailCounts,
+  MARK_CORE,
+  MARK_PX,
+  prepareSquares,
+  SPACING,
+  squarePx,
+  squaresInBox,
+  worldMarks,
+  type Squares,
+} from './stipple';
 import { pickAt, toPickable, type Pickable } from './geo';
 import type { Cell, Country, Pov, StateFeature } from './types';
 
@@ -31,10 +44,14 @@ export interface Stage {
   /** How close we are: record points grow a little as you drill from the whole range to a country to a state. */
   setRangeDetail(level: 'range' | 'country' | 'state'): void;
   /** cells feed the heatmap; points are the individual (rounded) wild records */
-  /** coarse: the points are squares `coarse` degrees across (animals counted by area), drawn as dots sized by records */
+  /** coarse: the points are squares `coarse` degrees across (animals counted by area), drawn as stipple */
   showRange(cells: Cell[], points: number[][], opts?: { coarse?: number }): void;
   /** heat: smoothed record-density bands; points: every place with a wild record */
   setRangeMode(mode: 'heat' | 'points'): void;
+  /** Points view of an animal counted by area: true once the camera settles zoomed in with none of its squares in view */
+  onStippleEmpty(cb: (empty: boolean) => void): void;
+  /** Drop the stipple of the animal shown, as a new one starts loading; heat and individual records are left as they are. */
+  clearSquares(): void;
   clearRange(): void;
   project(lat: number, lng: number): { x: number; y: number; visible: boolean };
   shiftTo(x: number, y: number, ms: number): void;
@@ -290,18 +307,60 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
   records.frustumCulled = false;
   records.visible = false;
   scene.add(records);
-  const cellDots = createCellDots(R);
-  scene.add(cellDots.mesh);
+
+  // Points for animals counted by area: stipple (stipple.ts). Like the heatmap, a world layer for the whole range and,
+  // below DETAIL_ALT once the camera settles, a detail layer for the squares around the view with the grades re-cut
+  // against them. Two detail layers take turns, so the old one fades out while the new one fades in.
+  const STIPPLE_R = R * 1.006;
+  const SWAP_MS = 200;
+  const stipple = createStipple(SPACING, MARK_PX, MARK_CORE);
+  const stippleLayers = [stipple.world, ...stipple.details];
+  for (const l of stippleLayers) scene.add(l.points);
+  const fades = stippleLayers.map(() => ({ from: 0, to: 0, start: 0 }));
+  const NO_MARKS = { position: new Float32Array(), info: new Float32Array(), dither: new Float32Array() };
+  let squares: Squares | null = null;
+  let squareXYZ = new Float32Array(); // each square's centre on the globe, to tell whether any is in view
+  let front = 0; // the detail layer holding the current detail
+  let stippleDetail = false; // a detail layer is showing instead of the world one
+  let stippleAt: { lat: number; lng: number; altitude: number; halfSpan: number } | null = null;
+  let instantSwap = false; // the Points view just came on: show the right layer at once, not as a crossfade
+  let stippleEmpty = false;
+  let emptyCb: (empty: boolean) => void = () => {};
+  const stippleOn = () => hasRange && rangeMode === 'points' && coarse;
+  function fadeTo(l: (typeof stippleLayers)[number], to: number, now: number) {
+    const f = fades[stippleLayers.indexOf(l)];
+    f.from = reduced || instantSwap ? to : l.mat.uniforms.opacity.value;
+    f.to = to;
+    f.start = now;
+  }
+  function paintStipple(now: number) {
+    const on = stippleOn();
+    stippleLayers.forEach((l, i) => {
+      const f = fades[i];
+      const k = Math.min(1, (now - f.start) / SWAP_MS);
+      const o = f.from + (f.to - f.from) * (1 - Math.pow(1 - k, 3));
+      l.mat.uniforms.opacity.value = o;
+      l.points.visible = on && o > 0.001;
+    });
+  }
+  function setEmpty(v: boolean) {
+    if (v === stippleEmpty) return;
+    stippleEmpty = v;
+    emptyCb(v);
+  }
 
   const applyMode = () => {
     heat.setVisible(hasRange && rangeMode === 'heat' && !detailOn);
     detail.setVisible(hasRange && rangeMode === 'heat' && detailOn);
     records.visible = hasRange && rangeMode === 'points' && !coarse;
-    cellDots.setVisible(hasRange && rangeMode === 'points' && coarse);
+    paintStipple(performance.now());
   };
   const setPointSize = () => {
     recMat.uniforms.size.value = pointPx * dpr;
+    stipple.setDpr(dpr);
   };
+  setPointSize();
+  stipple.setView(window.innerHeight, camera.fov);
 
   function setRecords(pts: number[][]) {
     const buf = new Float32Array(pts.length * 3);
@@ -475,9 +534,45 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     camera.updateProjectionMatrix();
   }
 
+  /** The stipple detail for the squares around the view, swapped in with a crossfade. */
+  function drawStipple(sq: Squares, p: Pov, halfSpan: number, now: number) {
+    const idx = squaresInBox(sq, p.lat, p.lng, halfSpan);
+    const cls = boxClasses(sq, idx);
+    const { n, spacingScale } = detailCounts(
+      idx.map((j) => sq.lat[j]),
+      cls,
+      squarePx(window.innerHeight, camera.fov, p.altitude),
+    );
+    const next = stipple.details[1 - front];
+    next.set(buildMarks(sq, idx, cls, (k) => n[k], STIPPLE_R), spacingScale);
+    fadeTo(next, 1, now);
+    fadeTo(stipple.details[front], 0, now);
+    fadeTo(stipple.world, 0, now);
+    front = 1 - front;
+  }
+
+  const vp = new THREE.Matrix4();
+  const sp = new THREE.Vector3();
+  /** whether the centre of any of the animal's squares is on the visible side of the globe and on screen */
+  function anySquareInView() {
+    vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const c = camera.position;
+    for (let i = 0; i < squareXYZ.length; i += 3) {
+      const x = squareXYZ[i];
+      const y = squareXYZ[i + 1];
+      const z = squareXYZ[i + 2];
+      if (x * (c.x - x) + y * (c.y - y) + z * (c.z - z) <= 0) continue; // the far side
+      sp.set(x, y, z).applyMatrix4(vp);
+      if (Math.abs(sp.x) <= 1 && Math.abs(sp.y) <= 1) return true;
+    }
+    return false;
+  }
+
   /** Keep the detail layer in step with the camera: drop it when zoomed out, redraw it once a move has settled. */
   function updateDetail(now: number, moved: boolean) {
-    if (!hasRange || rangeMode !== 'heat' || coarse) return;
+    // the heat detail is for animals with individual records; the stipple detail for those counted by area
+    const dots = rangeMode === 'points' && coarse;
+    if (!hasRange || (rangeMode === 'heat' ? coarse : !coarse)) return;
     if (moved) {
       lastMoveT = now;
       detailCheck = true;
@@ -486,15 +581,23 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     const p = globe.pointOfView();
     if (p.altitude >= DETAIL_ALT) {
       detailCheck = false;
-      if (detailOn) {
+      if (dots) {
+        if (stippleDetail) {
+          stippleDetail = false;
+          fadeTo(stipple.world, 1, now);
+          for (const l of stipple.details) fadeTo(l, 0, now);
+        }
+        setEmpty(false);
+      } else if (detailOn) {
         detailOn = false;
         applyMode();
       }
+      instantSwap = false;
       return;
     }
     if (now - lastMoveT < SETTLE_MS) return; // still moving: the drawn patch stays put on the globe until then
     detailCheck = false;
-    const d = drawnAt;
+    const d = dots ? stippleAt : drawnAt;
     const cos = Math.cos((p.lat * Math.PI) / 180);
     const dLng = ((((p.lng - (d?.lng ?? 0)) % 360) + 540) % 360) - 180;
     const fresh =
@@ -502,10 +605,24 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       p.altitude / d.altitude > 0.8 &&
       p.altitude / d.altitude < 1.25 &&
       Math.hypot(p.lat - d.lat, dLng * cos) < d.halfSpan * 0.3;
+    // about 1.5x what is in view, so a short pan (or the phone layout's lifted globe) doesn't reach the edge
+    // before the redraw; wider on wide screens
+    const halfSpan = Math.min(80, p.altitude * 30 * Math.max(1, window.innerWidth / window.innerHeight) * 1.5);
+    if (dots) {
+      instantSwap = false;
+      if (!squares) return;
+      if (!fresh) {
+        drawStipple(squares, p, halfSpan, now);
+        stippleAt = { lat: p.lat, lng: p.lng, altitude: p.altitude, halfSpan };
+      } else if (!stippleDetail) {
+        fadeTo(stipple.details[front], 1, now);
+        fadeTo(stipple.world, 0, now);
+      }
+      stippleDetail = true;
+      setEmpty(squares.count > 0 && !anySquareInView());
+      return;
+    }
     if (!fresh) {
-      // about 1.5x what is in view, so a short pan (or the phone layout's lifted globe) doesn't reach the edge
-      // before the redraw; wider on wide screens
-      const halfSpan = Math.min(80, p.altitude * 30 * Math.max(1, window.innerWidth / window.innerHeight) * 1.5);
       // smoothing follows the zoom: ~35 km at the closest zoom, ~90 km at the switch-over
       const sigma = Math.max(0.12, p.altitude * 0.9);
       detail.draw(rangePts, p.lat, p.lng, halfSpan, sigma);
@@ -528,6 +645,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     const moved = !lastCam.equals(camera.matrixWorld);
     if (moved) lastCam.copy(camera.matrixWorld);
     updateDetail(now, moved);
+    paintStipple(now);
     for (const cb of frameCbs) cb(moved);
     // the globe turned under a still pointer (auto-rotate, a fly-to): what is under it may have changed
     if (moved && pointer && !hoverQueued && !dragging) {
@@ -596,24 +714,60 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
       coarse = !!opts?.coarse;
       hasRange = cells.length > 0 || points.length > 0;
       if (cells.length) heat.show(cells);
-      if (opts?.coarse) cellDots.show(points, cells);
-      else setRecords(points);
+      const now = performance.now();
+      if (opts?.coarse) {
+        squares = prepareSquares(points, cells);
+        const all = Uint32Array.from({ length: squares.count }, (_, j) => j);
+        const m = worldMarks(squares.count);
+        stipple.world.set(buildMarks(squares, all, squares.cls, () => m, STIPPLE_R));
+        squareXYZ = new Float32Array(squares.count * 3);
+        const tmp: number[] = [];
+        for (let j = 0; j < squares.count; j++) {
+          tmp.length = 0;
+          toXYZ(squares.lat[j], squares.lng[j], tmp);
+          squareXYZ.set(tmp, j * 3);
+        }
+      } else {
+        squares = null;
+        setRecords(points);
+      }
+      for (const l of stipple.details) l.set(NO_MARKS);
       // a new animal: whatever detail was drawn belongs to the last one
       rangePts = points;
       drawnAt = null;
       detailOn = false;
+      stippleAt = null;
+      stippleDetail = false;
+      fades.forEach((f, i) => Object.assign(f, { from: +(i === 0), to: +(i === 0), start: now })); // the world layer, at once
+      setEmpty(false);
       detailCheck = true;
       applyMode();
     },
     clearRange() {
       hasRange = false;
       heat.hide();
+      instantSwap = false;
+      setEmpty(false);
       applyMode();
     },
     setRangeMode(mode) {
+      // switching between Heatmap and Points is instant, so the stipple comes on with the right layer already up
+      instantSwap = hasRange && coarse && mode === 'points' && rangeMode !== 'points';
       rangeMode = mode;
+      if (mode !== 'points') setEmpty(false);
       detailCheck = true;
       applyMode();
+    },
+    onStippleEmpty: (cb) => (emptyCb = cb),
+    clearSquares() {
+      if (!coarse) return;
+      squares = null;
+      squareXYZ = new Float32Array();
+      for (const l of stippleLayers) l.set(NO_MARKS);
+      stippleAt = null;
+      stippleDetail = false;
+      instantSwap = false;
+      setEmpty(false);
     },
     project(lat, lng) {
       const c = globe.getCoords(lat, lng, 0.004);
@@ -657,6 +811,7 @@ export function createStage(el: HTMLElement, countries: Country[], opts: StageOp
     resize() {
       globe.width(window.innerWidth).height(window.innerHeight);
       applyShift();
+      stipple.setView(window.innerHeight, camera.fov);
     },
   };
   return stage;

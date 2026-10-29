@@ -305,113 +305,106 @@ export function createDetailHeat(globeRadius = R, altitude = 0.0052) {
  * 0.35°, about 39 km. Points are snapped back onto them, so rounding in the file can't shift a square.
  */
 export const AREA_CELL = 180 / 512;
-const snap = (v: number, origin: number) => origin + (Math.round((v - origin) / AREA_CELL - 0.5) + 0.5) * AREA_CELL;
 
 /**
- * The Points view for animals counted by area. Their places sit on a fixed lattice, and drawn as equal dots a wide
- * range turns into a regular grid that says only "recorded here". Each is drawn instead as a dot at its cell's
- * centre, sized and shaded by records (graduated symbols, as in a printed atlas): small and dim where the animal is
- * recorded thinly, swelling until neighbours touch where it is recorded most, so the lattice gives way to the
- * pattern. The weight is a cell's own count when the data has it (a third value in the point), and otherwise the
- * 2° density around it (the world heatmap's surface, sampled at the cell). Classes are the same area quantiles as
- * the heatmap's bands.
+ * The stipple marks for animals counted by area (the maths, the spacing per class and the mark size are in
+ * stipple.ts). Marks are screen-space points of a fixed CSS size; per frame the shader works out how many marks each
+ * square should show from how big it is on screen, so zooming adds marks one by one, fading each in, with no work on
+ * the CPU. Three layers share the look: the world layer and two detail layers, so an old detail can fade out while
+ * the new one fades in.
  */
-/** dot radius per class, as a share of half a cell: the area grows about sixfold from the faintest to the top */
-const DOT_R = [0.4, 0.52, 0.64, 0.8, 0.98];
-
-export function createCellDots(globeRadius = R, altitude = 0.0048) {
-  const geo = new THREE.BufferGeometry();
-  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.y = -Math.PI / 2; // as the heat layers
-  mesh.renderOrder = 0.6;
-  mesh.frustumCulled = false;
-  mesh.visible = false;
-  const radius = globeRadius * (1 + altitude);
-  const rad = Math.PI / 180;
-  const place = (lat: number, lng: number, out: number[]) => {
-    const phi = (lng + 180) * rad;
-    const theta = (90 - lat) * rad;
-    const s = Math.sin(theta);
-    out.push(-radius * Math.cos(phi) * s, radius * Math.cos(theta), radius * Math.sin(phi) * s);
+export function createStipple(spacing: number[], markPx: number, core: number, order = 0.6) {
+  // sRGB values straight to the screen, as the plate's legend uses them
+  const ink = (r: number, g: number, b: number) => new THREE.Vector3(r / 255, g / 255, b / 255);
+  const shared = {
+    pxScale: { value: 1 }, // CSS px per world unit at a depth of one unit
+    dpr: { value: 1 },
+    markPx: { value: markPx },
+    side: { value: (R * AREA_CELL * Math.PI) / 180 }, // a square's side on the ground, in world units
+    spacing: { value: spacing },
+    inks: { value: HEAT_BANDS.slice(1).map(([r, g, b]) => ink(r, g, b)) },
+    rim: { value: ink(0x1c, 0x09, 0x04) },
+    core: { value: core },
   };
-  // the heatmap's colours, more opaque: a dot is a discrete mark, not a wash
-  const colours = HEAT_BANDS.slice(1).map(([r, g, b, a]) => {
-    const c = new THREE.Color(r / 255, g / 255, b / 255).convertSRGBToLinear();
-    return [c.r, c.g, c.b, Math.min(0.9, 0.2 + a)];
-  });
+  const vertexShader = /* glsl */ `
+    uniform float pxScale; uniform float dpr; uniform float markPx; uniform float side;
+    uniform float spacing[5]; uniform vec3 inks[5]; uniform float spacingScale;
+    attribute vec4 info; // candidate index, class, presence floor, size factor
+    attribute float dither; // the square's threshold, so where it gets under one mark an even share of squares light
+    varying vec3 vInk; varying float vAlpha; varying float vAA;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      // in world space: the mesh is turned a quarter about y, and cameraPosition is a world position
+      vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+      vec3 n = normalize(wp);
+      // thinned towards the limb, or foreshortened squares crowd their marks and the edge reads as more records
+      float facing = max(0.0, dot(n, normalize(cameraPosition - wp)));
+      float px = pxScale * side / -mv.z;
+      float cosLat = sqrt(max(0.0, 1.0 - n.y * n.y));
+      int k = int(info.y + 0.5);
+      float s = spacing[k] * spacingScale;
+      // a mark on the far side, lifted just off the ground, would peek out past the globe's outline: none there.
+      // The floor thins with facing too, or squares holding one mark each crowd together at the limb as a bright rim.
+      float lambda = facing > 0.0 ? max(px * px * cosLat * facing / (s * s), info.z * facing) : 0.0;
+      // mark i shows once lambda passes i plus the square's threshold, fading in over a fifth of a mark
+      vAlpha = clamp((lambda - info.x - dither) * 5.0, 0.0, 1.0);
+      vInk = inks[k];
+      float size = markPx * dpr * info.w;
+      vAA = 0.5 / size; // half a device pixel, so the rim stays whole at the edge
+      gl_PointSize = vAlpha > 0.0 ? size : 0.0;
+      gl_Position = vAlpha > 0.0 ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
+    }`;
+  // a core in the class's ink and a dark rim out to the sprite's edge, so a mark keeps at least 3:1 against snow and
+  // desert (the rim) and against forest (the core). The core's edge is hard: blurred over a pixel, a mark this small
+  // would be all blend and no rim.
+  const fragmentShader = /* glsl */ `
+    uniform vec3 rim; uniform float core; uniform float opacity;
+    varying vec3 vInk; varying float vAlpha; varying float vAA;
+    void main() {
+      float d = length(gl_PointCoord - 0.5);
+      float t = step(core, d);
+      float a = mix(1.0, 0.95, t) * (1.0 - smoothstep(0.5 - vAA, 0.5, d)) * vAlpha * opacity;
+      if (a < 0.01) discard;
+      gl_FragColor = vec4(mix(vInk, rim, t), a);
+    }`;
 
-  /** the 2° surface at a spot: the same kernel as createHeat, over the cells within reach */
-  function smoothed(cells: Cell[]) {
-    const SIGMA = 2.2;
-    const byCell = new Map<string, Cell[]>();
-    const key = (la: number, lo: number) => `${Math.floor(la / 2)},${Math.floor((((lo + 180) % 360) + 360) % 360 / 2)}`;
-    for (const c of cells) {
-      const k = key(c[0], c[1]);
-      if (!byCell.has(k)) byCell.set(k, []);
-      byCell.get(k)!.push(c);
-    }
-    return (lat: number, lng: number) => {
-      let v = 0;
-      const cos = Math.max(0.05, Math.cos(lat * rad));
-      const span = Math.min(90, Math.ceil(3 / cos) + 1);
-      for (let dy = -4; dy <= 4; dy++)
-        for (let dx = -span; dx <= span; dx++) {
-          for (const c of byCell.get(key(lat + dy * 2, lng + dx * 2)) ?? []) {
-            const dLng = ((((c[1] - lng) % 360) + 540) % 360) - 180;
-            const d2 = (c[0] - lat) ** 2 + (dLng * cos) ** 2;
-            if (d2 < 49) v += c[2] * Math.exp(-d2 / (2 * SIGMA * SIGMA));
-          }
-        }
-      return v;
+  const layer = (o: number) => {
+    const geo = new THREE.BufferGeometry();
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { ...shared, opacity: { value: 0 }, spacingScale: { value: 1 } },
+      vertexShader,
+      fragmentShader,
+    });
+    const points = new THREE.Points(geo, mat);
+    points.renderOrder = o;
+    points.frustumCulled = false;
+    points.visible = false;
+    return {
+      points,
+      mat,
+      set(m: { position: Float32Array; info: Float32Array; dither: Float32Array }, spacingScale = 1) {
+        points.geometry.dispose();
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(m.position, 3));
+        g.setAttribute('info', new THREE.BufferAttribute(m.info, 4));
+        g.setAttribute('dither', new THREE.BufferAttribute(m.dither, 1));
+        points.geometry = g;
+        mat.uniforms.spacingScale.value = spacingScale;
+      },
     };
-  }
+  };
 
   return {
-    mesh,
-    show(raw: number[][], cells: Cell[]) {
-      const seen = new Map<string, number[]>();
-      for (const p of raw) {
-        const lat = snap(p[0], -90);
-        const lng = snap(p[1], -180);
-        const k = `${lat},${lng}`;
-        const hit = seen.get(k);
-        if (hit) hit[2] = (hit[2] ?? 0) + (p[2] ?? 0);
-        else seen.set(k, p.length > 2 ? [lat, lng, p[2]] : [lat, lng]);
-      }
-      const points = [...seen.values()];
-      const side = AREA_CELL;
-      const at = points.some((p) => p.length > 2) ? null : smoothed(cells);
-      const w = points.map((p) => (at ? at(p[0], p[1]) : p[2] ?? 1));
-      // class breaks: the values at the top 50%, 25%, 10% and 3% of the cells
-      const sorted = [...w].sort((a, b) => a - b);
-      const breaks = HEAT_TOP.map((t) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * (1 - t)))]);
-      const pos: number[] = [];
-      const col: number[] = [];
-      const SEG = 14;
-      points.forEach((p, i) => {
-        let k = 0;
-        while (k < breaks.length && w[i] >= breaks[k] && (k === 0 || breaks[k] > breaks[k - 1])) k++;
-        const [lat, lng] = p;
-        // radius as a share of half the cell: the top class nearly touches its neighbours, the faintest is a speck.
-        // A cell narrows on the ground towards the poles (by cos lat), so the dot does too, or at 60°N neighbours
-        // run together into streaks along each row.
-        const cos = Math.max(0.05, Math.cos(lat * rad));
-        const r = (side / 2) * DOT_R[k] * cos;
-        for (let j = 0; j < SEG; j++) {
-          const a0 = (j / SEG) * Math.PI * 2;
-          const a1 = ((j + 1) / SEG) * Math.PI * 2;
-          place(lat, lng, pos);
-          place(lat + r * Math.sin(a0), lng + (r * Math.cos(a0)) / cos, pos);
-          place(lat + r * Math.sin(a1), lng + (r * Math.cos(a1)) / cos, pos);
-          for (let v = 0; v < 3; v++) col.push(...colours[k]);
-        }
-      });
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    world: layer(order),
+    details: [layer(order + 0.001), layer(order + 0.002)],
+    /** the canvas height in CSS px and the camera's vertical field of view */
+    setView(heightPx: number, fovDeg: number) {
+      shared.pxScale.value = heightPx / (2 * Math.tan((fovDeg * Math.PI) / 360));
     },
-    setVisible(v: boolean) {
-      mesh.visible = v;
+    setDpr(dpr: number) {
+      shared.dpr.value = dpr;
     },
   };
 }
