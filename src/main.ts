@@ -10,6 +10,7 @@ import { createStage } from './stage';
 import { createSearch, type Filters, type Why } from './search';
 import { animalOfTheDay, makeSlugs } from './slug';
 import { HEAT_BANDS } from './heat';
+import { INSET, jitterOf, MARK_CORE, MARK_PX, r2, SPACING } from './stipple';
 import { annotateCountry, countryPov, pickAt, rangePov, toPickable } from './geo';
 import { compact, groupPlural, ordinal, recordHistogram, shareBars } from './charts';
 import { esc, extLink, nf, plural } from './html';
@@ -100,6 +101,17 @@ async function boot() {
   // how the range is drawn; remembered per browser, heatmap by default
   let rangeMode: 'heat' | 'points' = 'heat';
   let shownPoints = 0;
+  // Points view of an animal counted by area, zoomed in with none of its squares in view: a note says so. Its text is
+  // updated in place, not by redrawing the plate, and the plate's live region is switched off for it, so panning
+  // doesn't announce it again and again.
+  let stippleEmpty = false;
+  const emptyNote = () =>
+    stippleEmpty && selected && !pointsFailed.has(selected.id) ? 'None of its squares are in view. Zoom out to find its range.' : '';
+  stage.onStippleEmpty((empty) => {
+    stippleEmpty = empty;
+    const el = plate.querySelector<HTMLElement>('.stipple-empty');
+    if (el) el.textContent = emptyNote();
+  });
   try {
     const saved = localStorage.getItem('arf.rangeMode');
     if (saved === 'points' || saved === 'dots') rangeMode = 'points'; // "dots" was the old name
@@ -367,14 +379,20 @@ async function boot() {
 
   // ---------- selecting animals ----------
   const pointCache = new Map<number, number[][]>();
+  const pointsFailed = new Set<number>(); // animals whose points could not be fetched; not cached, so opening again retries
   const moreCache = new Map<number, More | null>(); // the longer descriptions, loaded when first opened
   const moreOpen = new Set<number>(); // which are open, so a redraw of the plate keeps them open
   async function loadPoints(s: Species): Promise<number[][]> {
     const hit = pointCache.get(s.id);
     if (hit) return hit;
-    const pts: number[][] = await fetch(`${BASE}data/points/${s.id}.json`)
-      .then((r) => (r.ok ? r.json() : []))
-      .catch(() => []);
+    const pts: number[][] | null = await fetch(`${BASE}data/points/${s.id}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    if (!pts) {
+      pointsFailed.add(s.id);
+      return [];
+    }
+    pointsFailed.delete(s.id);
     pointCache.set(s.id, pts);
     return pts;
   }
@@ -403,6 +421,9 @@ async function boot() {
     stage.stopAutoRotate();
     selected = s;
     shownPoints = 0;
+    // the last animal's stipple must not stand in for this one's while it loads, and a failed load is tried again
+    stage.clearSquares();
+    pointsFailed.delete(s.id);
     activeCountry = keep?.iso ?? null;
     activeState = keep?.state ?? null;
     const idx = list.findIndex((x) => x.id === s.id);
@@ -832,7 +853,9 @@ async function boot() {
       <p class="map-caveat">${
         rangeMode === 'heat'
           ? 'The shading shows where people have recorded this animal, not an expert range map.'
-          : 'Each dot is a place where people logged this animal on GBIF, not an expert range map.'
+          : s.binned
+            ? 'The stipple shows where people logged this animal on GBIF, not an expert range map.'
+            : 'Each dot is a place where people logged this animal on GBIF, not an expert range map.'
       }</p>
       <p class="plate-no">No. ${s.no} · ${esc(s.group)} · ${esc(s.family)}</p>
       <div class="plate-head${s.img && wide ? ' is-wide' : ''}">
@@ -868,16 +891,19 @@ async function boot() {
             rangeMode === 'heat'
               ? `${heatLegend('whole range', 'most-recorded 3%')}
                  <details class="more"><summary>How to read the map</summary><p class="note">Where wild records are densest, counted from every GBIF record of this animal. The palest band is everywhere it has been recorded; each step up covers a smaller share of that area with the most records: the top half, quarter, 10% and 3%. So the brightest patches are always the busiest few percent of its range, however big the range is. ${s.binned ? 'It is smoothed over about 2°.' : 'Zoomed out it is smoothed over about 2°; zoomed in it is redrawn from the places in view, with the bands taken from what is in view.'} It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
-              : `${s.binned ? heatLegend('top 50% of squares', 'top 3%') : ''}<p class="legend-point"><i aria-hidden="true"></i>${s.binned ? 'A square with records; bigger and brighter where there are more' : 'A place with a record'}${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
-                 <details class="more"><summary>About these points</summary><p class="note">${
-                   s.binned
-                     ? 'Each square is about 39 km across (0.35°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area and each square gets one dot at its centre. The dots grow and brighten where it is recorded most: the top half, quarter, 10% and 3% of squares, as on the heatmap.'
-                     : `Each point is a place where a wild record was logged, rounded to ${
-                         s.pointsRounding === 0.1
-                           ? 'about 11 km, because this animal is threatened or poached and exact locations can help poachers'
-                           : 'about 1 km'
-                       }. Repeat sightings at the same spot show as one point.`
-                 }</p></details>`
+              : s.binned
+                ? `${stippleLegend()}${
+                    pointsFailed.has(s.id)
+                      ? '<p class="note stipple-note" role="status">Could not load its squares just now.</p>'
+                      : `<p class="legend-point is-stipple"><i aria-hidden="true"></i>Marks fall only in squares with records; closer and brighter where there are more${shownPoints ? ` · ${nf.format(shownPoints)} squares` : ''}</p>`
+                  }<p class="note stipple-note stipple-empty" aria-live="off">${emptyNote()}</p>
+                 <details class="more"><summary>How to read the map</summary><p class="note stipple-note">Each square is about 39 km across (0.35°) and holds at least two GBIF records of this animal. It has too many records to draw one by one, so they are counted by area. Every square with records is filled with fine stipple, like the shading on an engraved map: the more records, the closer and brighter the marks. The grades are the top half, quarter, 10% and 3% of squares. Zoomed out they are taken from the whole range; zoomed in, from the squares in view, and more marks appear as the squares grow. Marks are spread evenly inside a square, so they show how busy the square is, not where in it the records were. Squares with no records stay empty. It follows where people look as well as where the animal lives, so treat it as a guide, not a population count.</p></details>`
+                : `<p class="legend-point"><i aria-hidden="true"></i>A place with a record${shownPoints ? ` · ${nf.format(shownPoints)} shown` : ''}</p>
+                 <details class="more"><summary>About these points</summary><p class="note">Each point is a place where a wild record was logged, rounded to ${
+                   s.pointsRounding === 0.1
+                     ? 'about 11 km, because this animal is threatened or poached and exact locations can help poachers'
+                     : 'about 1 km'
+                 }. Repeat sightings at the same spot show as one point.</p></details>`
           }
         </dd></div>
       </dl>
@@ -896,6 +922,28 @@ async function boot() {
     return `<span class="legend" aria-hidden="true">${HEAT_BANDS.slice(1)
       .map(([r, g, b, a]) => `<i style="background:rgba(${r},${g},${b},${a})"></i>`)
       .join('')}</span><span class="legend-ends" aria-hidden="true"><span>${low}</span><span>${high}</span></span>`;
+  }
+
+  /**
+   * The stipple's grades as a key: a swatch per class, dotted by the same sequence, spacing and ink as the globe's
+   * marks. 44 px wide so the five run as wide as the heatmap's key and its two end labels fit under them.
+   */
+  function stippleLegend() {
+    const W = 44;
+    const H = 12;
+    const swatches = HEAT_BANDS.slice(1).map(([r, g, b], k) => {
+      const n = Math.max(1, Math.round((W * H) / SPACING[k] ** 2));
+      let dots = '';
+      for (let i = 0; i < n; i++) {
+        const [x, y] = r2(k + 1, i);
+        const cx = (INSET + x * (1 - 2 * INSET)) * W;
+        const cy = (INSET + y * (1 - 2 * INSET)) * H;
+        const s = MARK_PX * jitterOf(k + 1, i);
+        dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(s * 0.5).toFixed(2)}" fill="#1c0904" fill-opacity="0.95"/><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(s * MARK_CORE).toFixed(2)}" fill="rgb(${r},${g},${b})"/>`;
+      }
+      return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${dots}</svg>`;
+    });
+    return `<span class="legend stipple-key" aria-hidden="true">${swatches.join('')}</span><span class="legend-ends stipple-note" aria-hidden="true"><span>every square with records</span><span>busiest 3%</span></span>`;
   }
 
   /** "Read more": the rest of the Wikipedia introduction and a few sentences each on looks, behaviour, diet, home and young. */
